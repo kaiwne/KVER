@@ -1,4 +1,4 @@
-name: 📦 Build & Publish XBPS Packages
+name: 🏗️ Build & Publish XBPS Packages
 
 on:
   push:
@@ -6,17 +6,22 @@ on:
       - main
     paths:
       - 'srcpkgs/**'
+      - 'common/**'
   workflow_dispatch:
     inputs:
       package_name:
         description: 'Package to build ("all" or specific package name)'
         required: false
         default: 'all'
-      force_rebuild_all:
+      force_rebuild:
         description: 'Force rebuild all packages regardless of git diff'
         type: boolean
         required: false
         default: false
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: write
@@ -31,7 +36,7 @@ jobs:
     name: 🛠️ Build & Publish Packages
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/void-linux/void-glibc-full:latest
+      image: ghcr.io/void-linux/voidlinux:latest
       options: --privileged
 
     steps:
@@ -40,39 +45,31 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: 🧰 Install build tools & create builder user
+      - name: 🧰 Setup build environment & non-root user
         run: |
+          # Synchronize package database and install essential build tooling
           xbps-install -Syu --yes xbps
-          xbps-install -Sy --yes git bash curl jq coreutils github-cli sudo
+          xbps-install -Sy --yes git bash curl jq coreutils gh sudo
 
+          # Create unprivileged 'builder' user required by xbps-src security check
           useradd -m -s /bin/bash builder
           echo "builder ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
 
       - name: 🔐 Configure safe git workspace
         run: git config --global --add safe.directory "*"
 
-      - name: 🏗️ Bootstrap xbps-src build environment
-        run: |
-          git clone --depth=1 https://github.com/void-linux/void-packages.git "${{ env.VOID_PKGS_DIR }}"
-          
-          echo "XBPS_ALLOW_RESTRICTED=yes" >> "${{ env.VOID_PKGS_DIR }}/etc/conf"
-          echo "XBPS_CHROOT_CMD=chroot" >> "${{ env.VOID_PKGS_DIR }}/etc/conf"
-
-          chown -R builder:builder "${{ env.VOID_PKGS_DIR }}" "$GITHUB_WORKSPACE"
-
-          su builder -c "cd ${{ env.VOID_PKGS_DIR }} && ./xbps-src binary-bootstrap"
-
       - name: 🔍 Determine packages to build
-        id: detect_pkgs
+        id: detect
         run: |
           INPUT_PKG="${{ inputs.package_name }}"
-          FORCE_ALL="${{ inputs.force_rebuild_all }}"
-
-          if [ "$FORCE_ALL" = "true" ] || { [ "$INPUT_PKG" = "all" ] && [ "${{ github.event_name }}" = "workflow_dispatch" ]; }; then
-            echo "Action: Manual trigger - Building ALL packages"
+          FORCE_BUILD="${{ inputs.force_rebuild }}"
+          
+          PKGS=""
+          if [ "$FORCE_BUILD" = "true" ] || { [ "$INPUT_PKG" = "all" ] && [ "${{ github.event_name }}" = "workflow_dispatch" ]; }; then
+            echo "Action: Building ALL packages in srcpkgs/"
             PKGS=$(find srcpkgs -mindepth 1 -maxdepth 1 -type d -exec basename {} \;)
           elif [ -n "$INPUT_PKG" ] && [ "$INPUT_PKG" != "all" ] && [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "Action: Manual trigger - Building target package ($INPUT_PKG)"
+            echo "Action: Building target package: $INPUT_PKG"
             PKGS="$INPUT_PKG"
           else
             echo "Action: Auto-detecting modified packages via git diff"
@@ -80,58 +77,95 @@ jobs:
             PKGS=$(echo "$CHANGED_FILES" | cut -d'/' -f2 | sort -u | grep -v '^$' || true)
           fi
 
-          if [ -z "$(echo "$PKGS" | xargs)" ]; then
+          PKGS_FLAT=$(echo "$PKGS" | xargs)
+          if [ -z "$PKGS_FLAT" ]; then
             echo "No package changes detected. Skipping build."
-            echo "skip_build=true" >> $GITHUB_OUTPUT
+            echo "skip=true" >> "$GITHUB_OUTPUT"
           else
-            PKGS_FLAT=$(echo "$PKGS" | tr '\n' ' ' | xargs)
-            echo "Packages to build: $PKGS_FLAT"
-            echo "pkgs=$PKGS_FLAT" >> $GITHUB_OUTPUT
-            echo "skip_build=false" >> $GITHUB_OUTPUT
+            echo "Packages scheduled to build: $PKGS_FLAT"
+            echo "pkgs=$PKGS_FLAT" >> "$GITHUB_OUTPUT"
+            echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: ⚙️ Build packages with xbps-src
-        if: steps.detect_pkgs.outputs.skip_build != 'true'
+      - name: 🏗️ Bootstrap xbps-src environment
+        if: steps.detect.outputs.skip != 'true'
         run: |
+          # Clone upstream void-packages build environment
+          git clone --depth=1 https://github.com/void-linux/void-packages.git "${{ env.VOID_PKGS_DIR }}"
+          
+          # Set 'ethereal' chroot backend designed specifically for Docker CI containers
+          echo "XBPS_ALLOW_RESTRICTED=yes" >> "${{ env.VOID_PKGS_DIR }}/etc/conf"
+          echo "XBPS_CHROOT_CMD=ethereal" >> "${{ env.VOID_PKGS_DIR }}/etc/conf"
+
+          # Sync local custom common files (e.g., shlibs) if present
           if [ -d "$GITHUB_WORKSPACE/common" ]; then
             cp -rf "$GITHUB_WORKSPACE/common"/* "${{ env.VOID_PKGS_DIR }}/common/"
           fi
 
-          for pkg in ${{ steps.detect_pkgs.outputs.pkgs }}; do
-            if [ -d "$GITHUB_WORKSPACE/srcpkgs/$pkg" ]; then
-              echo "==> Syncing srcpkgs/$pkg to build workspace..."
-              cp -rf "$GITHUB_WORKSPACE/srcpkgs/$pkg" "${{ env.VOID_PKGS_DIR }}/srcpkgs/"
-            else
-              echo "⚠️ Warning: Directory srcpkgs/$pkg not found!"
-            fi
-          done
-
+          # Grant non-root user full ownership of workspace
           chown -R builder:builder "${{ env.VOID_PKGS_DIR }}" "$GITHUB_WORKSPACE"
 
-          for pkg in ${{ steps.detect_pkgs.outputs.pkgs }}; do
-            if [ -d "${{ env.VOID_PKGS_DIR }}/srcpkgs/$pkg" ]; then
-              echo "==> Building package: $pkg"
-              su builder -c "cd ${{ env.VOID_PKGS_DIR }} && ./xbps-src -m masterdir pkg $pkg"
+          # Initialize binary bootstrap under builder user
+          su - builder -c "cd ${{ env.VOID_PKGS_DIR }} && ./xbps-src binary-bootstrap"
+
+      - name: ⚙️ Build packages
+        if: steps.detect.outputs.skip != 'true'
+        run: |
+          # Copy target package templates into void-packages workspace
+          for pkg in ${{ steps.detect.outputs.pkgs }}; do
+            if [ -d "$GITHUB_WORKSPACE/srcpkgs/$pkg" ]; then
+              echo "==> Syncing srcpkgs/$pkg..."
+              cp -rf "$GITHUB_WORKSPACE/srcpkgs/$pkg" "${{ env.VOID_PKGS_DIR }}/srcpkgs/"
             fi
           done
 
-      - name: 🔏 Sign packages & update repository index
-        if: steps.detect_pkgs.outputs.skip_build != 'true'
+          # Re-apply permissions after copying new files
+          chown -R builder:builder "${{ env.VOID_PKGS_DIR }}"
+
+          # Build packages sequentially as unprivileged builder user
+          for pkg in ${{ steps.detect.outputs.pkgs }}; do
+            if [ -d "${{ env.VOID_PKGS_DIR }}/srcpkgs/$pkg" ]; then
+              echo "==> Building package: $pkg"
+              su - builder -c "cd ${{ env.VOID_PKGS_DIR }} && ./xbps-src -f pkg $pkg"
+            fi
+          done
+
+      - name: 🔏 Sign packages & generate repodata
+        if: steps.detect.outputs.skip != 'true'
         env:
           XBPS_PRIVATE_KEY: ${{ secrets.XBPS_PRIVATE_KEY }}
         run: |
-          KEY_PATH="/tmp/xbps_privkey.pem"
-          echo "$XBPS_PRIVATE_KEY" > "$KEY_PATH"
-          chmod 600 "$KEY_PATH"
-
           BINPKGS_DIR="${{ env.VOID_PKGS_DIR }}/hostdir/binpkgs"
 
-          xbps-rindex --sign-pkg --privkey "$KEY_PATH" "$BINPKGS_DIR"/*.xbps
-          xbps-rindex --add "$BINPKGS_DIR"/*.xbps
-          xbps-rindex --sign --privkey "$KEY_PATH" "$BINPKGS_DIR"/${{ env.TARGET_ARCH }}-repodata
+          # Validate output directory contains built .xbps binaries
+          if ! ls "$BINPKGS_DIR"/*.xbps 1>/dev/null 2>&1; then
+            echo "❌ Error: No binary packages found after build step!"
+            exit 1
+          fi
 
-      - name: 🚀 Overwrite GitHub Release
-        if: steps.detect_pkgs.outputs.skip_build != 'true'
+          # Sign binaries and repodata index if private key secret exists
+          if [ -n "$XBPS_PRIVATE_KEY" ]; then
+            KEY_PATH="/tmp/xbps_privkey.pem"
+            echo "$XBPS_PRIVATE_KEY" > "$KEY_PATH"
+            chmod 600 "$KEY_PATH"
+
+            echo "🔑 Signing binary packages..."
+            xbps-rindex --sign-pkg --privkey "$KEY_PATH" "$BINPKGS_DIR"/*.xbps
+
+            echo "📊 Updating repository index..."
+            xbps-rindex --add "$BINPKGS_DIR"/*.xbps
+
+            echo "🔏 Signing repository repodata..."
+            xbps-rindex --sign --privkey "$KEY_PATH" "$BINPKGS_DIR"/${{ env.TARGET_ARCH }}-repodata
+
+            rm -f "$KEY_PATH"
+          else
+            echo "⚠️ Notice: secrets.XBPS_PRIVATE_KEY is missing. Generating index without RSA signature."
+            xbps-rindex --add "$BINPKGS_DIR"/*.xbps
+          fi
+
+      - name: 🚀 Publish release to GitHub
+        if: steps.detect.outputs.skip != 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -147,6 +181,7 @@ jobs:
           RELEASE_TITLE="${{ env.TARGET_ARCH }} - Latest Release"
           RELEASE_BODY="<small>${{ env.TARGET_ARCH }} - Build ${BUILD_TIME}</small>"
 
+          # Overwrite GitHub Release tag cleanly
           gh release delete "${{ env.RELEASE_TAG }}" --yes --cleanup-tag || true
           git tag -f "${{ env.RELEASE_TAG }}"
           git push origin "${{ env.RELEASE_TAG }}" --force
