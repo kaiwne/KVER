@@ -25,7 +25,7 @@ if [[ -z "$CURRENT_VER" ]]; then
     exit 1
 fi
 
-# Extract primary GitHub repository (owner/repo) directly from any github.com URL in template
+# Extract primary GitHub repository (owner/repo) directly from distfiles/urls in template
 MAIN_REPO=$(grep -oP 'github\.com/\K[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+' "$TEMPLATE_FILE" | head -n1 | sed 's/\.git$//' | xargs || true)
 
 if [[ -z "$MAIN_REPO" ]]; then
@@ -37,19 +37,19 @@ echo "[INFO] Main Repo     : $MAIN_REPO"
 echo "[INFO] Current Ver   : $CURRENT_VER"
 
 # ------------------------------------------------------------------------------
-# 1. Fetch Latest Upstream Version
+# 1. Fetch Latest Upstream Version Tag
 # ------------------------------------------------------------------------------
 echo "[INFO] Fetching latest release tag from GitHub..."
 LATEST_VER=$(curl -sL "https://api.github.com/repos/$MAIN_REPO/releases/latest" | jq -r '.tag_name // empty' | sed 's/^v//' | xargs || true)
 
-# Fallback to latest git tag if no official release exists
+# Fallback to latest tag if no official GitHub release exists
 if [[ -z "$LATEST_VER" || "$LATEST_VER" == "null" ]]; then
-    echo "[INFO] No official release found. Fallback to latest tag..."
+    echo "[INFO] No official release found. Fetching latest git tag..."
     LATEST_VER=$(curl -sL "https://api.github.com/repos/$MAIN_REPO/tags" | jq -r '.[0].name // empty' | sed 's/^v//' | xargs || true)
 fi
 
 if [[ -z "$LATEST_VER" || "$LATEST_VER" == "null" ]]; then
-    echo "⚠️ Warning: Failed to fetch latest version for $MAIN_REPO" >&2
+    echo "⚠️ Warning: Failed to fetch latest version for $MAIN_REPO. Keeping current version." >&2
     LATEST_VER="$CURRENT_VER"
 fi
 
@@ -89,9 +89,9 @@ if [[ "$CURRENT_VER" == "$LATEST_VER" ]] && [[ "$HAS_SUB_UPDATES" == "false" ]];
     exit 0
 fi
 
-echo "[INFO] Updates detected! Updating template file..."
+echo "[INFO] Updates detected! Modifying template file..."
 
-# Use '@' as sed delimiter to safely avoid syntax errors with slashes or quotes
+# Use '@' as sed delimiter to prevent errors with slashes or sub-expressions
 sed -i "s@^\(version=\).*@\1${LATEST_VER}@" "$TEMPLATE_FILE"
 sed -i "s@^\(revision=\).*@\11@" "$TEMPLATE_FILE"
 
