@@ -1,0 +1,28 @@
+# Template file for 'fcitx5-lotus'
+pkgname=fcitx5-lotus
+version=3.6.0
+revision=1
+bamboo_version=0daa4e21776c79a974898afd45528d9c698fbbc8
+build_style=cmake
+configure_args=""
+hostmakedepends="extra-cmake-modules gettext pkg-config librsvg-utils go"
+makedepends="libfcitx5-devel libX11-devel libinput-devel eudev-libudev-devel"
+depends="fcitx5 fcitx5-configtool python3-QtPy python3-pyqt6 python3-pyqt6-gui python3-pyqt6-widgets python3-dbus"
+short_desc="Fcitx5 - Lotus engine"
+maintainer="Kaiwne <kaiwne@proton.me>"
+license="GPL-3.0"
+homepage="https://lotusinputmethod.github.io/"
+distfiles="https://github.com/LotusInputMethod/fcitx5-lotus/archive/refs/tags/v${version}.tar.gz 
+	         https://github.com/LotusInputMethod/bamboo-core/archive/${bamboo_version}.tar.gz"
+checksum="785b785854b12a6bcb321194829c25578df6f48f9a2732b4216183bd8938c609
+          2806ce1f822f942ffaad2f7085fcba37091a0221d3dc5c54609d437c30f01d2f"
+
+skip_extraction="${bamboo_version}.tar.gz"
+
+post_extract() {
+	vsrcextract -C "bamboo/bamboo-core" "${bamboo_version}.tar.gz"
+}
+
+# system_accounts="uinput_proxy"
+# uinput_proxy_groups="input"
+# uinput_proxy_descr="Lotus UInput Proxy User"
