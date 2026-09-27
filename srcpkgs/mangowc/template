@@ -1,6 +1,6 @@
 # Template file for 'mangowc'
 pkgname=mangowc
-version=0.17.3
+version=0.16.1
 revision=1
 conf_files="/etc/mango/config.conf"
 build_style=meson
@@ -13,7 +13,7 @@ license="GPL-3.0-or-later"
 homepage="https://github.com/mangowm/mango"
 changelog="https://github.com/mangowm/mango/releases"
 distfiles="https://github.com/mangowm/mango/archive/refs/tags/${version}.tar.gz"
+checksum=fe3d34e5731983083a83cc2b4ce0f61b538d2fe7f84e7a85aae5ec427d863c10
 
 build_options="xwayland"
 desc_option_xwayland="Enable Xwayland support"
-checksum=9d3d3e1298e1b2b56c740a0805e3f2e0a928cfc42c2ad1a21bf623ad070b4c74
