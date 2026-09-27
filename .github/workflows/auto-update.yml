@@ -73,7 +73,7 @@ jobs:
         id: git_push
         run: |
           git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
 
           if [ -d "downloaded_updates" ]; then
             for dir in downloaded_updates/updated-*; do
@@ -87,7 +87,7 @@ jobs:
           if [ -n "$(git status --porcelain srcpkgs/)" ]; then
             echo "✨ Detected template updates! Committing..."
             git add srcpkgs/
-            git commit -m "auto(srcpkgs): update package templates"
+            git commit -m "🚂 Auto update templates"
             git push origin main
             echo "has_changes=true" >> $GITHUB_OUTPUT
           else
