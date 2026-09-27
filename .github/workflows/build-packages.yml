@@ -25,14 +25,14 @@ env:
   TARGET_ARCH: "x86_64"
   TARGET_LIBC: "glibc"
   RELEASE_TAG: "x86_64-latest"
-  BUILD_CONTAINER: "ghcr.io/void-linux/voidlinux:latest"
+  BUILD_CONTAINER: "ghcr.io/void-linux/void-glibc-full:latest"
 
 jobs:
   build-and-publish:
     name: 🛠️ Build & Publish (${{ github.event.inputs.package_name || 'Auto-detect' }})
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/void-linux/voidlinux:latest
+      image: ghcr.io/void-linux/void-glibc-full:latest
       options: --privileged
 
     steps:
