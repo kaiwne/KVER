@@ -1,4 +1,4 @@
-name: 📦 Build & Release XBPS Packages
+name: 📦 Build & Publish XBPS Packages
 
 on:
   push:
@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
     inputs:
       package_name:
-        description: 'Package to build (use "all" to rebuild all, or specific package name)'
+        description: 'Package to build ("all" or specific package name)'
         required: false
         default: 'all'
       force_rebuild_all:
@@ -23,78 +23,86 @@ permissions:
 
 env:
   TARGET_ARCH: "x86_64"
-  TARGET_LIBC: "glibc"
   RELEASE_TAG: "x86_64-latest"
-  BUILD_CONTAINER: "ghcr.io/void-linux/void-glibc-full:latest"
+  VOID_PKGS_DIR: "/tmp/void-packages"
 
 jobs:
   build-and-publish:
-    name: 🛠️ Build & Publish (${{ github.event.inputs.package_name || 'Auto-detect' }})
+    name: 🛠️ Build & Publish Packages
     runs-on: ubuntu-latest
     container:
       image: ghcr.io/void-linux/void-glibc-full:latest
-      options: --privileged
 
     steps:
       - name: 📥 Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          fetch-depth: 0 # Retain history for git diff detection
 
-      - name: 🧰 Install build dependencies
+      - name: 🧰 Install system build tools
         run: |
           xbps-install -Syu --yes xbps
           xbps-install -Sy --yes git bash curl jq coreutils github-cli
 
-      - name: 🔐 Configure Safe Git Directory
-        run: |
-          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - name: 🔐 Configure safe git workspace
+        run: git config --global --add safe.directory "*"
 
-      - name: 🏗️ Initialize xbps-src environment
+      - name: 🏗️ Bootstrap xbps-src build environment
         run: |
-          echo "XBPS_ALLOW_RESTRICTED=yes" >> etc/conf
-          ./xbps-src binary-bootstrap
+          # Shallow clone official void-packages to provide xbps-src infrastructure
+          git clone --depth=1 https://github.com/void-linux/void-packages.git "${{ env.VOID_PKGS_DIR }}"
+          
+          # Enable restricted packages and bootstrap masterdir
+          echo "XBPS_ALLOW_RESTRICTED=yes" >> "${{ env.VOID_PKGS_DIR }}/etc/conf"
+          "${{ env.VOID_PKGS_DIR }}/xbps-src" binary-bootstrap
 
-      - name: 🎯 Determine packages to build
+      - name: 🔍 Determine packages to build
         id: detect_pkgs
         run: |
-          TARGET_PKG="${{ inputs.package_name }}"
+          INPUT_PKG="${{ inputs.package_name }}"
           FORCE_ALL="${{ inputs.force_rebuild_all }}"
 
-          if [ "$FORCE_ALL" = "true" ] || [ "$TARGET_PKG" = "all" ] && [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "Action: Rebuilding all packages in srcpkgs/"
-            PKGS=$(ls -d srcpkgs/* | xargs -n1 basename | tr '\n' ' ')
-          elif [ -n "$TARGET_PKG" ] && [ "$TARGET_PKG" != "all" ] && [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "Action: Building specified package -> $TARGET_PKG"
-            PKGS="$TARGET_PKG"
+          if [ "$FORCE_ALL" = "true" ] || [ "$INPUT_PKG" = "all" ] && [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "Action: Manual request - Building ALL packages"
+            PKGS=$(find srcpkgs -mindepth 1 -maxdepth 1 -type d -exec basename {} \;)
+          elif [ -n "$INPUT_PKG" ] && [ "$INPUT_PKG" != "all" ] && [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "Action: Manual request - Building target package ($INPUT_PKG)"
+            PKGS="$INPUT_PKG"
           else
-            echo "Action: Auto-detecting modified packages via git diff..."
+            echo "Action: Auto-detecting modified packages via git diff"
             CHANGED_FILES=$(git diff --name-only HEAD~1 HEAD -- 'srcpkgs/' || true)
-            PKGS=$(echo "$CHANGED_FILES" | cut -d'/' -f2 | sort -u | tr '\n' ' ')
+            PKGS=$(echo "$CHANGED_FILES" | cut -d'/' -f2 | sort -u | grep -v '^$' || true)
           fi
 
           if [ -z "$(echo "$PKGS" | xargs)" ]; then
-            echo "No packages identified for build."
-            echo "pkgs=" >> $GITHUB_OUTPUT
+            echo "No package changes detected. Skipping build."
             echo "skip_build=true" >> $GITHUB_OUTPUT
           else
-            echo "Target packages: $PKGS"
-            echo "pkgs=$PKGS" >> $GITHUB_OUTPUT
+            PKGS_FLAT=$(echo "$PKGS" | tr '\n' ' ' | xargs)
+            echo "Packages to build: $PKGS_FLAT"
+            echo "pkgs=$PKGS_FLAT" >> $GITHUB_OUTPUT
             echo "skip_build=false" >> $GITHUB_OUTPUT
           fi
 
-      - name: ⚙️ Build XBPS Packages
+      - name: ⚙️ Build packages with xbps-src
         if: steps.detect_pkgs.outputs.skip_build != 'true'
         run: |
-          PKGS="${{ steps.detect_pkgs.outputs.pkgs }}"
-          for pkg in $PKGS; do
-            echo "=========================================="
-            echo "Building package: $pkg"
-            echo "=========================================="
-            ./xbps-src -m hostdir/binpkgs pkg "$pkg"
+          # Merge overlay files (common & custom package templates) into void-packages
+          [ -d "common" ] && cp -rf common/* "${{ env.VOID_PKGS_DIR }}/common/"
+          
+          for pkg in ${{ steps.detect_pkgs.outputs.pkgs }}; do
+            if [ -d "srcpkgs/$pkg" ]; then
+              echo "==> Syncing srcpkgs/$pkg to build workspace..."
+              cp -rf "srcpkgs/$pkg" "${{ env.VOID_PKGS_DIR }}/srcpkgs/"
+              
+              echo "==> Building package: $pkg"
+              "${{ env.VOID_PKGS_DIR }}/xbps-src" -m masterdir pkg "$pkg"
+            else
+              echo "⚠️ Warning: Package directory srcpkgs/$pkg not found!"
+            fi
           done
 
-      - name: 🔏 Sign & Index XBPS Repository
+      - name: 🔏 Sign packages & update repository index
         if: steps.detect_pkgs.outputs.skip_build != 'true'
         env:
           XBPS_PRIVATE_KEY: ${{ secrets.XBPS_PRIVATE_KEY }}
@@ -103,43 +111,40 @@ jobs:
           echo "$XBPS_PRIVATE_KEY" > "$KEY_PATH"
           chmod 600 "$KEY_PATH"
 
-          BINPKGS_DIR="hostdir/binpkgs"
+          BINPKGS_DIR="${{ env.VOID_PKGS_DIR }}/hostdir/binpkgs"
 
-          echo "Signing XBPS binary packages..."
-          xbps-rindex --sign --signedby "KVXR Builder" --privkey "$KEY_PATH" "$BINPKGS_DIR"/*.xbps
+          # Sign all newly generated .xbps binary packages
+          xbps-rindex --sign-pkg --privkey "$KEY_PATH" "$BINPKGS_DIR"/*.xbps
 
-          echo "Updating repository repodata index..."
+          # Register packages into repodata index
           xbps-rindex --add "$BINPKGS_DIR"/*.xbps
 
-          echo "Signing repodata index..."
-          xbps-rindex --sign --signedby "KVXR Builder" --privkey "$KEY_PATH" "$BINPKGS_DIR"/${{ env.TARGET_ARCH }}-repodata
-
-          rm -f "$KEY_PATH"
-
-      - name: 📦 Prepare Release Artifacts
-        if: steps.detect_pkgs.outputs.skip_build != 'true'
-        run: |
-          DIST_DIR="dist_release"
-          mkdir -p "$DIST_DIR"
-
-          cp -v hostdir/binpkgs/*.xbps "$DIST_DIR"/ 2>/dev/null || true
-          cp -v hostdir/binpkgs/*.sig2 "$DIST_DIR"/ 2>/dev/null || true
-          cp -v hostdir/binpkgs/${{ env.TARGET_ARCH }}-repodata* "$DIST_DIR"/ 2>/dev/null || true
-
-          BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-          echo "RELEASE_TITLE=${{ env.TARGET_ARCH }} - Latest Release" >> $GITHUB_ENV
-          echo "RELEASE_BODY=<small>${{ env.TARGET_ARCH }} - Build ${BUILD_TIME}</small>" >> $GITHUB_ENV
+          # Sign repodata index
+          xbps-rindex --sign --privkey "$KEY_PATH" "$BINPKGS_DIR"/${{ env.TARGET_ARCH }}-repodata
 
       - name: 🚀 Overwrite GitHub Release
         if: steps.detect_pkgs.outputs.skip_build != 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release delete "${{ env.RELEASE_TAG }}" --yes || true
+          BINPKGS_DIR="${{ env.VOID_PKGS_DIR }}/hostdir/binpkgs"
+          BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+          RELEASE_TITLE="${{ env.TARGET_ARCH }} - Latest Release"
+          RELEASE_BODY="<small>${{ env.TARGET_ARCH }} - Build ${BUILD_TIME}</small>"
+
+          # Force re-create tag and overwrite GitHub Release
+          gh release delete "${{ env.RELEASE_TAG }}" --yes --cleanup-tag || true
           git tag -f "${{ env.RELEASE_TAG }}"
           git push origin "${{ env.RELEASE_TAG }}" --force
 
-          gh release create "${{ env.RELEASE_TAG }}" dist_release/* \
-            --title "${{ env.RELEASE_TITLE }}" \
-            --notes "${{ env.RELEASE_BODY }}" \
-            --target main
+          gh release create "${{ env.RELEASE_TAG }}" \
+            --title "$RELEASE_TITLE" \
+            --notes "$RELEASE_BODY" \
+            "$BINPKGS_DIR"/*.xbps \
+            "$BINPKGS_DIR"/*.sig2 \
+            "$BINPKGS_DIR"/${{ env.TARGET_ARCH }}-repodata*
+
+      - name: 🧹 Cleanup sensitive credentials
+        if: always()
+        run: rm -f /tmp/xbps_privkey.pem
