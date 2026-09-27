@@ -1,0 +1,145 @@
+name: 📦 Build & Release XBPS Packages
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'srcpkgs/**'
+  workflow_dispatch:
+    inputs:
+      package_name:
+        description: 'Package to build (use "all" to rebuild all, or specific package name)'
+        required: false
+        default: 'all'
+      force_rebuild_all:
+        description: 'Force rebuild all packages regardless of git diff'
+        type: boolean
+        required: false
+        default: false
+
+permissions:
+  contents: write
+
+env:
+  TARGET_ARCH: "x86_64"
+  TARGET_LIBC: "glibc"
+  RELEASE_TAG: "x86_64-latest"
+  BUILD_CONTAINER: "ghcr.io/void-linux/voidlinux:latest"
+
+jobs:
+  build-and-publish:
+    name: 🛠️ Build & Publish (${{ github.event.inputs.package_name || 'Auto-detect' }})
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/void-linux/voidlinux:latest
+      options: --privileged
+
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 🧰 Install build dependencies
+        run: |
+          xbps-install -Syu --yes xbps
+          xbps-install -Sy --yes git bash curl jq coreutils github-cli
+
+      - name: 🔐 Configure Safe Git Directory
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: 🏗️ Initialize xbps-src environment
+        run: |
+          echo "XBPS_ALLOW_RESTRICTED=yes" >> etc/conf
+          ./xbps-src binary-bootstrap
+
+      - name: 🎯 Determine packages to build
+        id: detect_pkgs
+        run: |
+          TARGET_PKG="${{ inputs.package_name }}"
+          FORCE_ALL="${{ inputs.force_rebuild_all }}"
+
+          if [ "$FORCE_ALL" = "true" ] || [ "$TARGET_PKG" = "all" ] && [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "Action: Rebuilding all packages in srcpkgs/"
+            PKGS=$(ls -d srcpkgs/* | xargs -n1 basename | tr '\n' ' ')
+          elif [ -n "$TARGET_PKG" ] && [ "$TARGET_PKG" != "all" ] && [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "Action: Building specified package -> $TARGET_PKG"
+            PKGS="$TARGET_PKG"
+          else
+            echo "Action: Auto-detecting modified packages via git diff..."
+            CHANGED_FILES=$(git diff --name-only HEAD~1 HEAD -- 'srcpkgs/' || true)
+            PKGS=$(echo "$CHANGED_FILES" | cut -d'/' -f2 | sort -u | tr '\n' ' ')
+          fi
+
+          if [ -z "$(echo "$PKGS" | xargs)" ]; then
+            echo "No packages identified for build."
+            echo "pkgs=" >> $GITHUB_OUTPUT
+            echo "skip_build=true" >> $GITHUB_OUTPUT
+          else
+            echo "Target packages: $PKGS"
+            echo "pkgs=$PKGS" >> $GITHUB_OUTPUT
+            echo "skip_build=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: ⚙️ Build XBPS Packages
+        if: steps.detect_pkgs.outputs.skip_build != 'true'
+        run: |
+          PKGS="${{ steps.detect_pkgs.outputs.pkgs }}"
+          for pkg in $PKGS; do
+            echo "=========================================="
+            echo "Building package: $pkg"
+            echo "=========================================="
+            ./xbps-src -m hostdir/binpkgs pkg "$pkg"
+          done
+
+      - name: 🔏 Sign & Index XBPS Repository
+        if: steps.detect_pkgs.outputs.skip_build != 'true'
+        env:
+          XBPS_PRIVATE_KEY: ${{ secrets.XBPS_PRIVATE_KEY }}
+        run: |
+          KEY_PATH="/tmp/xbps_privkey.pem"
+          echo "$XBPS_PRIVATE_KEY" > "$KEY_PATH"
+          chmod 600 "$KEY_PATH"
+
+          BINPKGS_DIR="hostdir/binpkgs"
+
+          echo "Signing XBPS binary packages..."
+          xbps-rindex --sign --signedby "KVXR Builder" --privkey "$KEY_PATH" "$BINPKGS_DIR"/*.xbps
+
+          echo "Updating repository repodata index..."
+          xbps-rindex --add "$BINPKGS_DIR"/*.xbps
+
+          echo "Signing repodata index..."
+          xbps-rindex --sign --signedby "KVXR Builder" --privkey "$KEY_PATH" "$BINPKGS_DIR"/${{ env.TARGET_ARCH }}-repodata
+
+          rm -f "$KEY_PATH"
+
+      - name: 📦 Prepare Release Artifacts
+        if: steps.detect_pkgs.outputs.skip_build != 'true'
+        run: |
+          DIST_DIR="dist_release"
+          mkdir -p "$DIST_DIR"
+
+          cp -v hostdir/binpkgs/*.xbps "$DIST_DIR"/ 2>/dev/null || true
+          cp -v hostdir/binpkgs/*.sig2 "$DIST_DIR"/ 2>/dev/null || true
+          cp -v hostdir/binpkgs/${{ env.TARGET_ARCH }}-repodata* "$DIST_DIR"/ 2>/dev/null || true
+
+          BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          echo "RELEASE_TITLE=${{ env.TARGET_ARCH }} - Latest Release" >> $GITHUB_ENV
+          echo "RELEASE_BODY=<small>${{ env.TARGET_ARCH }} - Build ${BUILD_TIME}</small>" >> $GITHUB_ENV
+
+      - name: 🚀 Overwrite GitHub Release
+        if: steps.detect_pkgs.outputs.skip_build != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release delete "${{ env.RELEASE_TAG }}" --yes || true
+          git tag -f "${{ env.RELEASE_TAG }}"
+          git push origin "${{ env.RELEASE_TAG }}" --force
+
+          gh release create "${{ env.RELEASE_TAG }}" dist_release/* \
+            --title "${{ env.RELEASE_TITLE }}" \
+            --notes "${{ env.RELEASE_BODY }}" \
+            --target main
