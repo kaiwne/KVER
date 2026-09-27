@@ -31,7 +31,7 @@ jobs:
     name: 🛠️ Build & Publish Packages
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/void-linux/voidlinux:latest
+      image: ghcr.io/void-linux/void-glibc-full:latest
       options: --privileged # Grant privileges for chroot/namespaces inside container
 
     steps:
