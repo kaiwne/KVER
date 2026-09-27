@@ -31,31 +31,41 @@ jobs:
     name: 🛠️ Build & Publish Packages
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/void-linux/void-glibc-full:latest
-      options: --privileged # Required for xbps-src chroot and namespace operations
+      image: ghcr.io/void-linux/voidlinux:latest
+      options: --privileged # Grant privileges for chroot/namespaces inside container
 
     steps:
       - name: 📥 Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0 # Retain history for git diff detection
+          fetch-depth: 0 # Retain full git history for change detection
 
-      - name: 🧰 Install system build tools
+      - name: 🧰 Install build tools & create builder user
         run: |
+          # Synchronize XBPS and install core tools including sudo
           xbps-install -Syu --yes xbps
-          xbps-install -Sy --yes git bash curl jq coreutils github-cli
+          xbps-install -Sy --yes git bash curl jq coreutils github-cli sudo
+
+          # Create dedicated unprivileged user required by xbps-src
+          useradd -m -s /bin/bash builder
+          echo "builder ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
 
       - name: 🔐 Configure safe git workspace
         run: git config --global --add safe.directory "*"
 
       - name: 🏗️ Bootstrap xbps-src build environment
         run: |
-          # Shallow clone official void-packages to provide xbps-src infrastructure
+          # Clone official void-packages infrastructure
           git clone --depth=1 https://github.com/void-linux/void-packages.git "${{ env.VOID_PKGS_DIR }}"
           
-          cd "${{ env.VOID_PKGS_DIR }}"
-          echo "XBPS_ALLOW_RESTRICTED=yes" >> etc/conf
-          ./xbps-src binary-bootstrap
+          # Enable restricted packages in configuration
+          echo "XBPS_ALLOW_RESTRICTED=yes" >> "${{ env.VOID_PKGS_DIR }}/etc/conf"
+
+          # Assign workspace ownership to unprivileged builder user
+          chown -R builder:builder "${{ env.VOID_PKGS_DIR }}" "$GITHUB_WORKSPACE"
+
+          # Execute binary-bootstrap as non-root user to satisfy xbps-src security constraints
+          su builder -c "cd ${{ env.VOID_PKGS_DIR }} && ./xbps-src binary-bootstrap"
 
       - name: 🔍 Determine packages to build
         id: detect_pkgs
@@ -64,10 +74,10 @@ jobs:
           FORCE_ALL="${{ inputs.force_rebuild_all }}"
 
           if [ "$FORCE_ALL" = "true" ] || { [ "$INPUT_PKG" = "all" ] && [ "${{ github.event_name }}" = "workflow_dispatch" ]; }; then
-            echo "Action: Manual request - Building ALL packages"
+            echo "Action: Manual trigger - Building ALL packages"
             PKGS=$(find srcpkgs -mindepth 1 -maxdepth 1 -type d -exec basename {} \;)
           elif [ -n "$INPUT_PKG" ] && [ "$INPUT_PKG" != "all" ] && [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "Action: Manual request - Building target package ($INPUT_PKG)"
+            echo "Action: Manual trigger - Building target package ($INPUT_PKG)"
             PKGS="$INPUT_PKG"
           else
             echo "Action: Auto-detecting modified packages via git diff"
@@ -88,21 +98,29 @@ jobs:
       - name: ⚙️ Build packages with xbps-src
         if: steps.detect_pkgs.outputs.skip_build != 'true'
         run: |
-          # Sync overlay files (common & custom package templates) into void-packages
+          # Copy common build files if present
           if [ -d "$GITHUB_WORKSPACE/common" ]; then
             cp -rf "$GITHUB_WORKSPACE/common"/* "${{ env.VOID_PKGS_DIR }}/common/"
           fi
-          
-          cd "${{ env.VOID_PKGS_DIR }}"
+
+          # Sync target package templates into void-packages
           for pkg in ${{ steps.detect_pkgs.outputs.pkgs }}; do
             if [ -d "$GITHUB_WORKSPACE/srcpkgs/$pkg" ]; then
               echo "==> Syncing srcpkgs/$pkg to build workspace..."
               cp -rf "$GITHUB_WORKSPACE/srcpkgs/$pkg" "${{ env.VOID_PKGS_DIR }}/srcpkgs/"
-              
-              echo "==> Building package: $pkg"
-              ./xbps-src -m masterdir pkg "$pkg"
             else
-              echo "⚠️ Warning: Package directory srcpkgs/$pkg not found!"
+              echo "⚠️ Warning: Directory srcpkgs/$pkg not found!"
+            fi
+          done
+
+          # Re-apply ownership for non-root execution
+          chown -R builder:builder "${{ env.VOID_PKGS_DIR }}"
+
+          # Compile targets as builder user
+          for pkg in ${{ steps.detect_pkgs.outputs.pkgs }}; do
+            if [ -d "${{ env.VOID_PKGS_DIR }}/srcpkgs/$pkg" ]; then
+              echo "==> Building package: $pkg"
+              su builder -c "cd ${{ env.VOID_PKGS_DIR }} && ./xbps-src -m masterdir pkg $pkg"
             fi
           done
 
@@ -117,13 +135,13 @@ jobs:
 
           BINPKGS_DIR="${{ env.VOID_PKGS_DIR }}/hostdir/binpkgs"
 
-          # Sign binary packages (.xbps -> .sig2)
+          # Sign compiled binary packages (.xbps -> .sig2)
           xbps-rindex --sign-pkg --privkey "$KEY_PATH" "$BINPKGS_DIR"/*.xbps
 
-          # Register packages into repodata index
+          # Update repository repodata index
           xbps-rindex --add "$BINPKGS_DIR"/*.xbps
 
-          # Sign repository index (.sig2)
+          # Sign repository repodata index
           xbps-rindex --sign --privkey "$KEY_PATH" "$BINPKGS_DIR"/${{ env.TARGET_ARCH }}-repodata
 
       - name: 🚀 Overwrite GitHub Release
@@ -131,7 +149,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # Stage artifacts into a clean directory to prevent glob expansion issues
+          # Isolate release artifacts into staging directory
           DIST_DIR="/tmp/dist_release"
           mkdir -p "$DIST_DIR"
 
@@ -144,7 +162,7 @@ jobs:
           RELEASE_TITLE="${{ env.TARGET_ARCH }} - Latest Release"
           RELEASE_BODY="<small>${{ env.TARGET_ARCH }} - Build ${BUILD_TIME}</small>"
 
-          # Force re-create tag and overwrite GitHub Release
+          # Overwrite GitHub Release target
           gh release delete "${{ env.RELEASE_TAG }}" --yes --cleanup-tag || true
           git tag -f "${{ env.RELEASE_TAG }}"
           git push origin "${{ env.RELEASE_TAG }}" --force
