@@ -32,21 +32,19 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: ghcr.io/void-linux/void-glibc-full:latest
-      options: --privileged # Grant privileges for chroot/namespaces inside container
+      options: --privileged
 
     steps:
       - name: 📥 Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0 # Retain full git history for change detection
+          fetch-depth: 0
 
       - name: 🧰 Install build tools & create builder user
         run: |
-          # Synchronize XBPS and install core tools including sudo
           xbps-install -Syu --yes xbps
           xbps-install -Sy --yes git bash curl jq coreutils github-cli sudo
 
-          # Create dedicated unprivileged user required by xbps-src
           useradd -m -s /bin/bash builder
           echo "builder ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
 
@@ -55,16 +53,13 @@ jobs:
 
       - name: 🏗️ Bootstrap xbps-src build environment
         run: |
-          # Clone official void-packages infrastructure
           git clone --depth=1 https://github.com/void-linux/void-packages.git "${{ env.VOID_PKGS_DIR }}"
           
-          # Enable restricted packages in configuration
           echo "XBPS_ALLOW_RESTRICTED=yes" >> "${{ env.VOID_PKGS_DIR }}/etc/conf"
+          echo "XBPS_CHROOT_CMD=chroot" >> "${{ env.VOID_PKGS_DIR }}/etc/conf"
 
-          # Assign workspace ownership to unprivileged builder user
           chown -R builder:builder "${{ env.VOID_PKGS_DIR }}" "$GITHUB_WORKSPACE"
 
-          # Execute binary-bootstrap as non-root user to satisfy xbps-src security constraints
           su builder -c "cd ${{ env.VOID_PKGS_DIR }} && ./xbps-src binary-bootstrap"
 
       - name: 🔍 Determine packages to build
@@ -98,12 +93,10 @@ jobs:
       - name: ⚙️ Build packages with xbps-src
         if: steps.detect_pkgs.outputs.skip_build != 'true'
         run: |
-          # Copy common build files if present
           if [ -d "$GITHUB_WORKSPACE/common" ]; then
             cp -rf "$GITHUB_WORKSPACE/common"/* "${{ env.VOID_PKGS_DIR }}/common/"
           fi
 
-          # Sync target package templates into void-packages
           for pkg in ${{ steps.detect_pkgs.outputs.pkgs }}; do
             if [ -d "$GITHUB_WORKSPACE/srcpkgs/$pkg" ]; then
               echo "==> Syncing srcpkgs/$pkg to build workspace..."
@@ -113,10 +106,8 @@ jobs:
             fi
           done
 
-          # Re-apply ownership for non-root execution
-          chown -R builder:builder "${{ env.VOID_PKGS_DIR }}"
+          chown -R builder:builder "${{ env.VOID_PKGS_DIR }}" "$GITHUB_WORKSPACE"
 
-          # Compile targets as builder user
           for pkg in ${{ steps.detect_pkgs.outputs.pkgs }}; do
             if [ -d "${{ env.VOID_PKGS_DIR }}/srcpkgs/$pkg" ]; then
               echo "==> Building package: $pkg"
@@ -135,13 +126,8 @@ jobs:
 
           BINPKGS_DIR="${{ env.VOID_PKGS_DIR }}/hostdir/binpkgs"
 
-          # Sign compiled binary packages (.xbps -> .sig2)
           xbps-rindex --sign-pkg --privkey "$KEY_PATH" "$BINPKGS_DIR"/*.xbps
-
-          # Update repository repodata index
           xbps-rindex --add "$BINPKGS_DIR"/*.xbps
-
-          # Sign repository repodata index
           xbps-rindex --sign --privkey "$KEY_PATH" "$BINPKGS_DIR"/${{ env.TARGET_ARCH }}-repodata
 
       - name: 🚀 Overwrite GitHub Release
@@ -149,7 +135,6 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # Isolate release artifacts into staging directory
           DIST_DIR="/tmp/dist_release"
           mkdir -p "$DIST_DIR"
 
@@ -162,7 +147,6 @@ jobs:
           RELEASE_TITLE="${{ env.TARGET_ARCH }} - Latest Release"
           RELEASE_BODY="<small>${{ env.TARGET_ARCH }} - Build ${BUILD_TIME}</small>"
 
-          # Overwrite GitHub Release target
           gh release delete "${{ env.RELEASE_TAG }}" --yes --cleanup-tag || true
           git tag -f "${{ env.RELEASE_TAG }}"
           git push origin "${{ env.RELEASE_TAG }}" --force
