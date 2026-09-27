@@ -36,7 +36,7 @@ jobs:
     name: 🛠️ Build & Publish Packages
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/void-linux/voidlinux:latest
+      image: ghcr.io/void-linux/void-glibc-full:latest
       options: --privileged
 
     steps:
@@ -49,7 +49,7 @@ jobs:
         run: |
           # Synchronize package database and install essential build tooling
           xbps-install -Syu --yes xbps
-          xbps-install -Sy --yes git bash curl jq coreutils gh sudo
+          xbps-install -Sy --yes git bash curl jq coreutils github sudo
 
           # Create unprivileged 'builder' user required by xbps-src security check
           useradd -m -s /bin/bash builder
