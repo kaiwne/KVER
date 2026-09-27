@@ -43,7 +43,7 @@ jobs:
       - name: 🧰 Install system build tools
         run: |
           xbps-install -Syu --yes xbps
-          xbps-install -Sy --yes git bash curl jq coreutils gh
+          xbps-install -Sy --yes git bash curl jq coreutils github-cli
 
       - name: 🔐 Configure safe git workspace
         run: git config --global --add safe.directory "*"
