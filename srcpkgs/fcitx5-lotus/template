@@ -2,7 +2,7 @@
 pkgname=fcitx5-lotus
 version=3.5.4
 revision=1
-bamboo_version=7cabf8c336620e31470b1dc72cac7f1dd72f4a2d
+_bamboo_version=7cabf8c336620e31470b1dc72cac7f1dd72f4a2d
 build_style=cmake
 configure_args=""
 hostmakedepends="extra-cmake-modules gettext pkg-config librsvg-utils go"
@@ -13,14 +13,14 @@ maintainer="Kaiwne <kaiwne@proton.me>"
 license="GPL-3.0"
 homepage="https://lotusinputmethod.github.io/"
 distfiles="https://github.com/LotusInputMethod/fcitx5-lotus/archive/refs/tags/v${version}.tar.gz 
-           https://github.com/LotusInputMethod/bamboo-core/archive/${bamboo_version}.tar.gz"
+           https://github.com/LotusInputMethod/bamboo-core/archive/${_bamboo_version}.tar.gz"
 checksum="42a2f7cc0462ce6a1487d5f9f234e477cfe20dac42b13b0130b7455dbc95a2f4
           7a29ed0535db83a830c3c7faee21953682e4627adc33bf5f0f8e06db3fc4b96b"
 
 skip_extraction="${bamboo_version}.tar.gz"
 
 post_extract() {
-	vsrcextract -C "bamboo/bamboo-core" "${bamboo_version}.tar.gz"
+	vsrcextract -C "bamboo/bamboo-core" "${_bamboo_version}.tar.gz"
 }
 
 # system_accounts="uinput_proxy"
