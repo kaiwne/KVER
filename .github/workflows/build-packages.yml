@@ -49,7 +49,7 @@ jobs:
         run: |
           # Synchronize package database and install essential build tooling
           xbps-install -Syu --yes xbps
-          xbps-install -Sy --yes git bash curl jq coreutils github sudo
+          xbps-install -Sy --yes git bash curl jq coreutils github-cli sudo
 
           # Create unprivileged 'builder' user required by xbps-src security check
           useradd -m -s /bin/bash builder
