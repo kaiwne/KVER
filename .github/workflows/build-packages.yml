@@ -43,11 +43,9 @@ jobs:
 
       - name: 🧰 Setup build environment & builder user
         run: |
-          # Synchronize package database and install essential utilities
           xbps-install -Syu -y xbps
           xbps-install -Sy -y git bash curl jq coreutils github-cli sudo xtools
 
-          # Create unprivileged user in 'xbuilder' group to grant uchroot execution permissions
           useradd -G xbuilder -m -s /bin/bash builder || true
           echo "builder ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
 
@@ -85,16 +83,14 @@ jobs:
       - name: 🏗️ Setup void-packages workspace
         if: steps.detect.outputs.skip != 'true'
         run: |
-          # Clone upstream void-packages build tree
           git clone --depth=1 https://github.com/void-linux/void-packages.git "${{ env.VOID_PKGS_DIR }}"
 
-          # Configure uchroot isolation backend
           cat << 'EOF' >> "${{ env.VOID_PKGS_DIR }}/etc/conf"
           XBPS_ALLOW_RESTRICTED=yes
           XBPS_CHROOT_CMD=uchroot
           EOF
 
-          # Copy local srcpkgs templates into build workspace
+          # Copy srcpkgs templates into build workspace
           for pkg in ${{ steps.detect.outputs.pkgs }}; do
             if [ -d "$GITHUB_WORKSPACE/srcpkgs/$pkg" ]; then
               echo "==> Copying srcpkgs/$pkg to build workspace..."
@@ -102,21 +98,24 @@ jobs:
             fi
           done
 
-          # Copy optional common files if present
+          # Merge common directory safely without overwriting upstream shlibs database
           if [ -d "$GITHUB_WORKSPACE/common" ]; then
-            cp -rf "$GITHUB_WORKSPACE/common"/* "${{ env.VOID_PKGS_DIR }}/common/"
+            echo "==> Merging custom common directory..."
+            if [ -f "$GITHUB_WORKSPACE/common/shlibs" ]; then
+              echo "==> Appending custom shlibs entries..."
+              cat "$GITHUB_WORKSPACE/common/shlibs" >> "${{ env.VOID_PKGS_DIR }}/common/shlibs"
+            fi
+            # Copy all other common resources excluding the shlibs file itself
+            find "$GITHUB_WORKSPACE/common" -mindepth 1 -maxdepth 1 ! -name 'shlibs' -exec cp -rf {} "${{ env.VOID_PKGS_DIR }}/common/" \;
           fi
 
-          # Assign workspace ownership to builder user
           chown -R builder:builder "${{ env.VOID_PKGS_DIR }}"
 
       - name: ⚙️ Bootstrap & Build packages
         if: steps.detect.outputs.skip != 'true'
         run: |
-          # Initialize binary-bootstrap under builder user
           su - builder -c "cd ${{ env.VOID_PKGS_DIR }} && ./xbps-src binary-bootstrap"
 
-          # Compile scheduled target packages
           for pkg in ${{ steps.detect.outputs.pkgs }}; do
             echo "==> Building target package: $pkg"
             su - builder -c "cd ${{ env.VOID_PKGS_DIR }} && ./xbps-src -f pkg $pkg"
@@ -129,13 +128,11 @@ jobs:
         run: |
           BINPKGS_DIR="${{ env.VOID_PKGS_DIR }}/hostdir/binpkgs"
 
-          # Verify output binaries exist before signing
           if ! ls "$BINPKGS_DIR"/*.xbps 1>/dev/null 2>&1; then
             echo "❌ Error: No built .xbps artifacts found!"
             exit 1
           fi
 
-          # Sign packages and repodata index if private key is configured
           if [ -n "$XBPS_PRIVATE_KEY" ]; then
             KEY_PATH="/tmp/xbps_privkey.pem"
             echo "$XBPS_PRIVATE_KEY" > "$KEY_PATH"
@@ -173,7 +170,6 @@ jobs:
           RELEASE_TITLE="XBPS Binary Repository (${{ env.TARGET_ARCH }})"
           RELEASE_NOTES="Automated repository release updated at ${BUILD_TIME} (commit: ${{ github.sha }})"
 
-          # Update GitHub Release tag cleanly
           gh release delete "${{ env.RELEASE_TAG }}" --yes --cleanup-tag || true
           git tag -f "${{ env.RELEASE_TAG }}"
           git push origin "${{ env.RELEASE_TAG }}" --force
