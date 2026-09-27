@@ -3,9 +3,6 @@ set -euo pipefail
 
 TEMPLATE_FILE="template"
 
-# ------------------------------------------------------------------------------
-# 1. Environment & Helper Setup
-# ------------------------------------------------------------------------------
 if [[ ! -f "$TEMPLATE_FILE" ]]; then
     echo "❌ Error: '$TEMPLATE_FILE' not found in $(pwd)" >&2
     exit 1
@@ -16,23 +13,23 @@ trap 'rm -rf "$TMP_DIR"' EXIT
 
 echo "[INFO] Checking updates for package in '$(pwd)'..."
 
-# Helper to read any variable from template
-get_var() {
+# Safely extract variable value from template file
+get_template_var() {
     local var_name="$1"
     grep -E "^\s*${var_name}=" "$TEMPLATE_FILE" | head -n1 | cut -d'=' -f2- | tr -d '"' | tr -d "'" | xargs || true
 }
 
-CURRENT_VER=$(get_var "version")
+CURRENT_VER=$(get_template_var "version")
 if [[ -z "$CURRENT_VER" ]]; then
     echo "❌ Error: Could not parse 'version=' from $TEMPLATE_FILE" >&2
     exit 1
 fi
 
-# Extract main GitHub repository (owner/repo) from any github.com URL in template
+# Extract primary GitHub repository (owner/repo) directly from any github.com URL in template
 MAIN_REPO=$(grep -oP 'github\.com/\K[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+' "$TEMPLATE_FILE" | head -n1 | sed 's/\.git$//' | xargs || true)
 
 if [[ -z "$MAIN_REPO" ]]; then
-    echo "❌ Error: No GitHub repository found in $TEMPLATE_FILE" >&2
+    echo "❌ Error: No GitHub repository URL found in $TEMPLATE_FILE" >&2
     exit 1
 fi
 
@@ -40,12 +37,12 @@ echo "[INFO] Main Repo     : $MAIN_REPO"
 echo "[INFO] Current Ver   : $CURRENT_VER"
 
 # ------------------------------------------------------------------------------
-# 2. Upstream Version Fetching
+# 1. Fetch Latest Upstream Version
 # ------------------------------------------------------------------------------
 echo "[INFO] Fetching latest release tag from GitHub..."
 LATEST_VER=$(curl -sL "https://api.github.com/repos/$MAIN_REPO/releases/latest" | jq -r '.tag_name // empty' | sed 's/^v//' | xargs || true)
 
-# Fallback to latest tag if no official GitHub release exists
+# Fallback to latest git tag if no official release exists
 if [[ -z "$LATEST_VER" || "$LATEST_VER" == "null" ]]; then
     echo "[INFO] No official release found. Fallback to latest tag..."
     LATEST_VER=$(curl -sL "https://api.github.com/repos/$MAIN_REPO/tags" | jq -r '.[0].name // empty' | sed 's/^v//' | xargs || true)
@@ -59,7 +56,7 @@ fi
 echo "[INFO] Latest Ver    : $LATEST_VER"
 
 # ------------------------------------------------------------------------------
-# 3. Sub-Repository Commit Hash Detection (e.g. _bamboo_version)
+# 2. Detect & Query Sub-Module Commit Hashes (e.g., _bamboo_version)
 # ------------------------------------------------------------------------------
 SUB_VAR_NAMES=$(grep -oP '^\s*\K_[a-zA-Z0-9_]+_version(?==)' "$TEMPLATE_FILE" || true)
 
@@ -67,9 +64,7 @@ HAS_SUB_UPDATES=false
 declare -A SUB_NEW_VALS
 
 for sub_var in $SUB_VAR_NAMES; do
-    sub_curr_val=$(get_var "$sub_var")
-    
-    # Extract sub-repo URL matching the sub-variable
+    sub_curr_val=$(get_template_var "$sub_var")
     sub_repo=$(grep -oP "github\.com/\K[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+" "$TEMPLATE_FILE" | grep -v "$MAIN_REPO" | head -n1 | sed 's/\.git$//' | xargs || true)
     
     if [[ -n "$sub_repo" && -n "$sub_curr_val" ]]; then
@@ -87,7 +82,7 @@ for sub_var in $SUB_VAR_NAMES; do
 done
 
 # ------------------------------------------------------------------------------
-# 4. Update Check & Application
+# 3. Apply Template Modifications
 # ------------------------------------------------------------------------------
 if [[ "$CURRENT_VER" == "$LATEST_VER" ]] && [[ "$HAS_SUB_UPDATES" == "false" ]]; then
     echo "☕ Package is already up to date ($CURRENT_VER)."
@@ -96,11 +91,10 @@ fi
 
 echo "[INFO] Updates detected! Updating template file..."
 
-# Update main version and reset revision to 1
+# Use '@' as sed delimiter to safely avoid syntax errors with slashes or quotes
 sed -i "s@^\(version=\).*@\1${LATEST_VER}@" "$TEMPLATE_FILE"
 sed -i "s@^\(revision=\).*@\11@" "$TEMPLATE_FILE"
 
-# Update sub-repository commit hashes
 for sub_var in "${!SUB_NEW_VALS[@]}"; do
     sub_val="${SUB_NEW_VALS[$sub_var]}"
     sed -i "s@^\(${sub_var}=\).*@\1${sub_val}@" "$TEMPLATE_FILE"
@@ -108,7 +102,7 @@ for sub_var in "${!SUB_NEW_VALS[@]}"; do
 done
 
 # ------------------------------------------------------------------------------
-# 5. Checksum Recalculation
+# 4. Calculate & Update SHA256 Checksum(s)
 # ------------------------------------------------------------------------------
 echo "[INFO] Recalculating sha256 checksums..."
 
@@ -133,7 +127,7 @@ for url_entry in $EVAL_DISTFILES; do
         file_idx=$((file_idx + 1))
         target_file="$TMP_DIR/distfile_${file_idx}.tar.gz"
         
-        echo "[INFO] Downloading tarball: $clean_url"
+        echo "[INFO] Downloading archive: $clean_url"
         if curl -sL "$clean_url" -o "$target_file"; then
             csum=$(sha256sum "$target_file" | awk '{print $1}')
             echo "[INFO]   SHA256: $csum"
@@ -146,7 +140,7 @@ for url_entry in $EVAL_DISTFILES; do
     fi
 done
 
-# Write recalculated checksum to template
+# Write updated checksum back to template
 if [[ -n "$NEW_CHECKSUMS" ]]; then
     sed -i '/^\s*checksum=/d' "$TEMPLATE_FILE"
     if [[ "$NEW_CHECKSUMS" == *" "* ]]; then
