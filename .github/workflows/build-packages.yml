@@ -36,9 +36,8 @@ jobs:
           set -euo pipefail
           CHANGED_PKGS=()
 
-          # 1. Scan modified templates on Git push
+          # 1. Scan modified package templates on Git push
           if [ "${{ github.event_name }}" = "push" ]; then
-            echo "Scanning git diff for modified package templates..."
             BEFORE_SHA="${{ github.event.before }}"
             if [ "$BEFORE_SHA" = "0000000000000000000000000000000000000000" ]; then
               BEFORE_SHA="HEAD~1"
@@ -50,14 +49,12 @@ jobs:
             done
           fi
 
-          # 2. Check unbuilt packages on manual workflow dispatch
+          # 2. Scan unbuilt or updated packages on manual workflow dispatch
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "Fetching latest release assets from GitHub..."
             RELEASE_ASSETS=$(curl -sH "Authorization: token $GH_TOKEN" \
               "https://api.github.com/repos/${{ github.repository }}/releases/latest" \
               | grep -oE '"name": *"[^"]+"' | cut -d'"' -f4 || true)
 
-            echo "Scanning srcpkgs/ for unbuilt or updated packages..."
             for dir in srcpkgs/*; do
               if [ -f "$dir/template" ]; then
                 pkg=$(basename "$dir")
@@ -65,7 +62,6 @@ jobs:
                 revision=$(grep -E '^revision=' "$dir/template" | cut -d'=' -f2 | tr -d '"' | tr -d "'")
                 expected_pattern="${pkg}-${version}_${revision}."
                 if ! echo "$RELEASE_ASSETS" | grep -qF "$expected_pattern"; then
-                  echo "Found missing/unbuilt package: $pkg (${version}_${revision})"
                   CHANGED_PKGS+=("$pkg")
                 fi
               fi
@@ -124,12 +120,12 @@ jobs:
           ref: master
           path: void-packages
 
-      - name: Patch setup scripts
+      - name: Patch setup scripts for container compatibility
         working-directory: void-packages
         run: |
           sed -i 's@for var in $(awk .*;@for var in $(printenv | cut -d'"'"'='"'"' -f1);@' common/environment/setup/sourcepkg.sh
 
-      - name: Merge local repo and download existing binaries
+      - name: Merge local repository and fetch existing binary release
         working-directory: void-packages
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -155,33 +151,36 @@ jobs:
         run: |
           chown -R builder:builder .
 
-          # Extract package list from Job 1 JSON output
           RAW_PKGS=$(echo "$TARGET_PKGS_JSON" | jq -r '.[]')
           if [ -z "$RAW_PKGS" ]; then
             echo "No packages provided for building."
             exit 0
           fi
 
-          # Sort package dependencies
+          # Sort packages according to dependency order
           PKGS=$(sudo -Eu builder ./xbps-src sort-dependencies $RAW_PKGS)
 
-          # Remove existing binaries for rebuild target packages
+          # Clean old binaries for packages being rebuilt
           for pkg in $PKGS; do
             sudo -Eu builder find hostdir/binpkgs -name "${pkg}-*.xbps" -exec rm -fv {} + || true
+            sudo -Eu builder find hostdir/binpkgs -name "${pkg}-*.sig2" -exec rm -fv {} + || true
           done
 
           # Configure xbps-src build environment
           mkdir -p etc
-          echo "XBPS_BUILD_ENVIRONMENT=void-packages-ci" >> etc/conf
-          echo "XBPS_ALLOW_RESTRICTED=yes" >> etc/conf
-          echo "XBPS_CHROOT_CMD=uchroot" >> etc/conf
-          echo 'XBPS_REPOSITORY=$PWD/hostdir/binpkgs' >> etc/conf
-          echo 'XBPS_DISTDIR=$PWD/hostdir/distfiles' >> etc/conf
-          echo 'XBPS_MASTERDIR_PKGS="$PWD/hostdir/binpkgs"' >> etc/conf
+          cat << 'EOF' > etc/conf
+          XBPS_BUILD_ENVIRONMENT=void-packages-ci
+          XBPS_ALLOW_RESTRICTED=yes
+          XBPS_CHROOT_CMD=uchroot
+          XBPS_REPOSITORY=$PWD/hostdir/binpkgs
+          XBPS_DISTDIR=$PWD/hostdir/distfiles
+          XBPS_MASTERDIR_PKGS="$PWD/hostdir/binpkgs"
+          EOF
 
+          # Bootstrap build chroot
           sudo -Eu builder ./xbps-src -m masterdir-${ARCH} -A ${ARCH} binary-bootstrap
 
-          # Compile packages in dependency order
+          # Build packages in sorted dependency order
           for pkg in $PKGS; do
             echo "Building package: $pkg"
             sudo -Eu builder ./xbps-src -f pkg -j$(nproc) -m masterdir-${ARCH} -A ${ARCH} "$pkg"
@@ -190,7 +189,7 @@ jobs:
       - name: Sign packages and generate repodata index
         working-directory: void-packages/hostdir/binpkgs
         env:
-          PRIV_KEY: ${{ secrets.XBPS_PRIVATE_KEY }}
+          PRIV_KEY: ${{ secrets.XBPS_PRIVATE_KEY || secrets.PRIV_KEY }}
           ARCH: ${{ matrix.arch }}
           MAINTAINER: "${{ github.repository_owner }} <${{ github.repository_owner }}@users.noreply.github.com>"
         run: |
@@ -203,8 +202,10 @@ jobs:
             exit 0
           fi
 
+          # Index repository binaries
           xbps-rindex -a *.xbps
 
+          # Sign repository index and package binaries if private key is present
           if [ -n "$PRIV_KEY" ]; then
             printf "%s\n" "$PRIV_KEY" > private.pem
             chmod 600 private.pem
@@ -221,6 +222,7 @@ jobs:
         with:
           name: ${{ matrix.arch }}-repository
           path: void-packages/hostdir/binpkgs/
+          retention-days: 5
 
   # ==========================================
   # JOB 3: Publish GitHub Release
@@ -247,6 +249,9 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: "x86_64-latest"
         run: |
+          set -euo pipefail
+
+          # Re-create release tag to publish fresh assets cleanly
           gh release delete "$TAG" --cleanup-tag -y || true
 
           gh release create "$TAG" \
