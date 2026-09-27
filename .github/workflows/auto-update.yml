@@ -1,0 +1,102 @@
+name: 🔄 Auto Update
+
+on:
+  schedule:
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  discover-packages:
+    name: 🔍 Discover Packages
+    runs-on: ubuntu-latest
+    outputs:
+      packages: ${{ steps.set-matrix.outputs.packages }}
+      has_packages: ${{ steps.set-matrix.outputs.has_packages }}
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v4
+
+      - name: ⚙️ Detect update scripts
+        id: set-matrix
+        run: |
+          PKGS=$(find srcpkgs -mindepth 2 -maxdepth 2 -name update.sh | cut -d'/' -f2 | jq -R . | jq -s -c .)
+          echo "packages=${PKGS:-[]}" >> $GITHUB_OUTPUT
+          echo "has_packages=$([ -n "$PKGS" ] && [ "$PKGS" != "[]" ] && echo true || echo false)" >> $GITHUB_OUTPUT
+
+  update-package:
+    name: 🔄 Update ${{ matrix.package }}
+    needs: discover-packages
+    if: needs.discover-packages.outputs.has_packages == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        package: ${{ fromJson(needs.discover-packages.outputs.packages) }}
+
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v4
+
+      - name: ⚡ Execute update.sh
+        run: |
+          cd "srcpkgs/${{ matrix.package }}"
+          bash update.sh || echo "⚠️ Script warnings detected for ${{ matrix.package }}"
+
+      - name: 📤 Upload updated template artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: updated-${{ matrix.package }}
+          path: srcpkgs/${{ matrix.package }}
+          retention-days: 1
+
+  commit-and-trigger:
+    name: 🚀 Commit Updates & Trigger Build
+    needs: [discover-packages, update-package]
+    if: always() && needs.discover-packages.outputs.has_packages == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v4
+
+      - name: 📦 Download updated artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: updated-*
+          path: downloaded_updates
+        continue-on-error: true
+
+      - name: 📝 Apply changes & Commit
+        id: git_push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          if [ -d "downloaded_updates" ]; then
+            for dir in downloaded_updates/updated-*; do
+              if [ -d "$dir" ]; then
+                pkg_name=$(basename "$dir" | sed 's/updated-//')
+                cp -rf "$dir"/* "srcpkgs/$pkg_name/"
+              fi
+            done
+          fi
+
+          if [ -n "$(git status --porcelain srcpkgs/)" ]; then
+            echo "✨ Detected template updates! Committing..."
+            git add srcpkgs/
+            git commit -m "auto(srcpkgs): update package templates"
+            git push origin main
+            echo "has_changes=true" >> $GITHUB_OUTPUT
+          else
+            echo "☕ No template changes detected across all packages."
+            echo "has_changes=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: 📣 Dispatch Build Workflow
+        if: steps.git_push.outputs.has_changes == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh workflow run build-packages.yml -f package_name="all"
