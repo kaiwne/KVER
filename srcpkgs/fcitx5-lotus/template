@@ -17,7 +17,7 @@ distfiles="https://github.com/LotusInputMethod/fcitx5-lotus/archive/refs/tags/v$
 checksum="785b785854b12a6bcb321194829c25578df6f48f9a2732b4216183bd8938c609
  2806ce1f822f942ffaad2f7085fcba37091a0221d3dc5c54609d437c30f01d2f"
 
-skip_extraction="${bamboo_version}.tar.gz"
+skip_extraction="${_bamboo_version}.tar.gz"
 
 post_extract() {
 	vsrcextract -C "bamboo/bamboo-core" "${_bamboo_version}.tar.gz"
