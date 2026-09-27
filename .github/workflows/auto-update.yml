@@ -99,4 +99,4 @@ jobs:
         if: steps.git_push.outputs.has_changes == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh workflow run build-packages.yml -f package_name="all"
+        run: gh workflow run build-packages.yml
