@@ -32,6 +32,7 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: ghcr.io/void-linux/void-glibc-full:latest
+      options: --privileged # Required for xbps-src chroot and namespace operations
 
     steps:
       - name: 📥 Checkout repository
@@ -42,7 +43,7 @@ jobs:
       - name: 🧰 Install system build tools
         run: |
           xbps-install -Syu --yes xbps
-          xbps-install -Sy --yes git bash curl jq coreutils github-cli
+          xbps-install -Sy --yes git bash curl jq coreutils gh
 
       - name: 🔐 Configure safe git workspace
         run: git config --global --add safe.directory "*"
@@ -52,9 +53,9 @@ jobs:
           # Shallow clone official void-packages to provide xbps-src infrastructure
           git clone --depth=1 https://github.com/void-linux/void-packages.git "${{ env.VOID_PKGS_DIR }}"
           
-          # Enable restricted packages and bootstrap masterdir
-          echo "XBPS_ALLOW_RESTRICTED=yes" >> "${{ env.VOID_PKGS_DIR }}/etc/conf"
-          "${{ env.VOID_PKGS_DIR }}/xbps-src" binary-bootstrap
+          cd "${{ env.VOID_PKGS_DIR }}"
+          echo "XBPS_ALLOW_RESTRICTED=yes" >> etc/conf
+          ./xbps-src binary-bootstrap
 
       - name: 🔍 Determine packages to build
         id: detect_pkgs
@@ -62,7 +63,7 @@ jobs:
           INPUT_PKG="${{ inputs.package_name }}"
           FORCE_ALL="${{ inputs.force_rebuild_all }}"
 
-          if [ "$FORCE_ALL" = "true" ] || [ "$INPUT_PKG" = "all" ] && [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+          if [ "$FORCE_ALL" = "true" ] || { [ "$INPUT_PKG" = "all" ] && [ "${{ github.event_name }}" = "workflow_dispatch" ]; }; then
             echo "Action: Manual request - Building ALL packages"
             PKGS=$(find srcpkgs -mindepth 1 -maxdepth 1 -type d -exec basename {} \;)
           elif [ -n "$INPUT_PKG" ] && [ "$INPUT_PKG" != "all" ] && [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
@@ -87,16 +88,19 @@ jobs:
       - name: ⚙️ Build packages with xbps-src
         if: steps.detect_pkgs.outputs.skip_build != 'true'
         run: |
-          # Merge overlay files (common & custom package templates) into void-packages
-          [ -d "common" ] && cp -rf common/* "${{ env.VOID_PKGS_DIR }}/common/"
+          # Sync overlay files (common & custom package templates) into void-packages
+          if [ -d "$GITHUB_WORKSPACE/common" ]; then
+            cp -rf "$GITHUB_WORKSPACE/common"/* "${{ env.VOID_PKGS_DIR }}/common/"
+          fi
           
+          cd "${{ env.VOID_PKGS_DIR }}"
           for pkg in ${{ steps.detect_pkgs.outputs.pkgs }}; do
-            if [ -d "srcpkgs/$pkg" ]; then
+            if [ -d "$GITHUB_WORKSPACE/srcpkgs/$pkg" ]; then
               echo "==> Syncing srcpkgs/$pkg to build workspace..."
-              cp -rf "srcpkgs/$pkg" "${{ env.VOID_PKGS_DIR }}/srcpkgs/"
+              cp -rf "$GITHUB_WORKSPACE/srcpkgs/$pkg" "${{ env.VOID_PKGS_DIR }}/srcpkgs/"
               
               echo "==> Building package: $pkg"
-              "${{ env.VOID_PKGS_DIR }}/xbps-src" -m masterdir pkg "$pkg"
+              ./xbps-src -m masterdir pkg "$pkg"
             else
               echo "⚠️ Warning: Package directory srcpkgs/$pkg not found!"
             fi
@@ -113,13 +117,13 @@ jobs:
 
           BINPKGS_DIR="${{ env.VOID_PKGS_DIR }}/hostdir/binpkgs"
 
-          # Sign all newly generated .xbps binary packages
+          # Sign binary packages (.xbps -> .sig2)
           xbps-rindex --sign-pkg --privkey "$KEY_PATH" "$BINPKGS_DIR"/*.xbps
 
           # Register packages into repodata index
           xbps-rindex --add "$BINPKGS_DIR"/*.xbps
 
-          # Sign repodata index
+          # Sign repository index (.sig2)
           xbps-rindex --sign --privkey "$KEY_PATH" "$BINPKGS_DIR"/${{ env.TARGET_ARCH }}-repodata
 
       - name: 🚀 Overwrite GitHub Release
@@ -127,9 +131,16 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          BINPKGS_DIR="${{ env.VOID_PKGS_DIR }}/hostdir/binpkgs"
-          BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          # Stage artifacts into a clean directory to prevent glob expansion issues
+          DIST_DIR="/tmp/dist_release"
+          mkdir -p "$DIST_DIR"
 
+          BINPKGS_DIR="${{ env.VOID_PKGS_DIR }}/hostdir/binpkgs"
+          cp -v "$BINPKGS_DIR"/*.xbps "$DIST_DIR"/ 2>/dev/null || true
+          cp -v "$BINPKGS_DIR"/*.sig2 "$DIST_DIR"/ 2>/dev/null || true
+          cp -v "$BINPKGS_DIR"/${{ env.TARGET_ARCH }}-repodata* "$DIST_DIR"/ 2>/dev/null || true
+
+          BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
           RELEASE_TITLE="${{ env.TARGET_ARCH }} - Latest Release"
           RELEASE_BODY="<small>${{ env.TARGET_ARCH }} - Build ${BUILD_TIME}</small>"
 
@@ -138,12 +149,9 @@ jobs:
           git tag -f "${{ env.RELEASE_TAG }}"
           git push origin "${{ env.RELEASE_TAG }}" --force
 
-          gh release create "${{ env.RELEASE_TAG }}" \
+          gh release create "${{ env.RELEASE_TAG }}" "$DIST_DIR"/* \
             --title "$RELEASE_TITLE" \
-            --notes "$RELEASE_BODY" \
-            "$BINPKGS_DIR"/*.xbps \
-            "$BINPKGS_DIR"/*.sig2 \
-            "$BINPKGS_DIR"/${{ env.TARGET_ARCH }}-repodata*
+            --notes "$RELEASE_BODY"
 
       - name: 🧹 Cleanup sensitive credentials
         if: always()
