@@ -2,6 +2,12 @@ name: 🏗️ Build Packages
 
 on:
   workflow_dispatch:
+    inputs:
+      force_build_all:
+        description: '⚡ Rebuild all packages (bypass change detection)'
+        type: boolean
+        required: false
+        default: false
   push:
     branches:
       - main
@@ -32,12 +38,23 @@ jobs:
         id: set-pkgs
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          FORCE_BUILD: ${{ inputs.force_build_all }}
         run: |
           set -euo pipefail
           CHANGED_PKGS=()
 
-          # 1. Scan modified package templates on Git push
-          if [ "${{ github.event_name }}" = "push" ]; then
+          # 1. Force rebuild all packages if option is ticked
+          if [ "${FORCE_BUILD:-false}" = "true" ]; then
+            echo "⚡ Force build enabled! Scanning all packages in srcpkgs..."
+            for dir in srcpkgs/*; do
+              if [ -f "$dir/template" ]; then
+                pkg=$(basename "$dir")
+                CHANGED_PKGS+=("$pkg")
+              fi
+            done
+
+          # 2. Scan modified package templates on Git push
+          elif [ "${{ github.event_name }}" = "push" ]; then
             BEFORE_SHA="${{ github.event.before }}"
             if [ "$BEFORE_SHA" = "0000000000000000000000000000000000000000" ]; then
               BEFORE_SHA="HEAD~1"
@@ -47,10 +64,9 @@ jobs:
             for pkg in $git_diff_pkgs; do
               [ -f "srcpkgs/$pkg/template" ] && CHANGED_PKGS+=("$pkg")
             done
-          fi
 
-          # 2. Scan unbuilt or updated packages on manual workflow dispatch
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+          # 3. Scan unbuilt or updated packages on normal manual workflow dispatch
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             RELEASE_ASSETS=$(curl -sH "Authorization: token $GH_TOKEN" \
               "https://api.github.com/repos/${{ github.repository }}/releases/latest" \
               | grep -oE '"name": *"[^"]+"' | cut -d'"' -f4 || true)
