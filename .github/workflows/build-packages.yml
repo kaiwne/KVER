@@ -23,12 +23,12 @@ jobs:
       packages: ${{ steps.set-pkgs.outputs.packages }}
       has_changes: ${{ steps.set-pkgs.outputs.has_changes }}
     steps:
-      - name: Checkout repository
+      - name: 📥 Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Detect changed or missing packages
+      - name: 🔎 Detect changed or missing packages
         id: set-pkgs
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -105,7 +105,7 @@ jobs:
         - /dev:/dev
 
     steps:
-      - name: Prepare container environment
+      - name: ⚙️ Prepare container environment
         run: |
           mkdir -p /etc/xbps.d && cp /usr/share/xbps.d/*-repository-*.conf /etc/xbps.d/
           env -u XBPS_TARGET_ARCH xbps-install -Syu -y xbps
@@ -113,19 +113,19 @@ jobs:
           env -u XBPS_TARGET_ARCH xbps-install -y sudo bash curl grep jq zip unzip git github-cli xtools coreutils
           useradd -G xbuilder -M builder -s $(which bash) || true
 
-      - name: Checkout upstream void-packages
+      - name: 📥 Checkout upstream void-packages
         uses: actions/checkout@v4
         with:
           repository: void-linux/void-packages
           ref: master
           path: void-packages
 
-      - name: Patch setup scripts for container compatibility
+      - name: 🔧 Patch setup scripts for container compatibility
         working-directory: void-packages
         run: |
           sed -i 's@for var in $(awk .*;@for var in $(printenv | cut -d'"'"'='"'"' -f1);@' common/environment/setup/sourcepkg.sh
 
-      - name: Merge local repository and fetch existing binary release
+      - name: 🔀 Merge local repository and fetch existing binary release
         working-directory: void-packages
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -143,7 +143,7 @@ jobs:
           gh release download "$ARCH-latest" --pattern "*" --dir hostdir/binpkgs --repo "$REPO_OWNER/$REPO_NAME" || true
           rm -f hostdir/binpkgs/*.sig2
 
-      - name: Build target packages
+      - name: 🔨 Build target packages
         working-directory: void-packages
         env:
           ARCH: ${{ matrix.arch }}
@@ -186,7 +186,7 @@ jobs:
             sudo -Eu builder ./xbps-src -f pkg -j$(nproc) -m masterdir-${ARCH} -A ${ARCH} "$pkg"
           done
 
-      - name: Sign packages and generate repodata index
+      - name: 🔏 Sign packages and generate repodata index
         working-directory: void-packages/hostdir/binpkgs
         env:
           PRIV_KEY: ${{ secrets.XBPS_PRIVATE_KEY || secrets.PRIV_KEY }}
@@ -217,10 +217,10 @@ jobs:
             rm -f private.pem
           fi
 
-      - name: Upload build artifacts
+      - name: 📤 Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.arch }}-repository
+          name: x86_64-repository
           path: void-packages/hostdir/binpkgs/
           retention-days: 5
 
@@ -228,34 +228,40 @@ jobs:
   # JOB 3: Publish GitHub Release
   # ==========================================
   publish-release:
-    name: 📦 Publish GitHub Release
+    name: 🚀 Publish GitHub Release
     needs: [detect, build-and-sign]
     if: needs.build-and-sign.result == 'success'
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
-      - name: Checkout repository
+      - name: 📥 Checkout repository
         uses: actions/checkout@v4
 
-      - name: Download build artifacts
+      - name: ⬇️ Download build artifacts
         uses: actions/download-artifact@v4
         with:
           name: x86_64-repository
           path: ./release-assets
 
-      - name: Deploy release assets
+      - name: 🚀 Deploy release assets
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ARCH: "x86_64"
           TAG: "x86_64-latest"
         run: |
           set -euo pipefail
+
+          # Generate dynamic UTC ISO timestamp and formatted release metadata
+          BUILD_TIME=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
+          RELEASE_TITLE="📦 ${ARCH} - Latest Release"
+          RELEASE_NOTES="<small>${ARCH} - Build ${BUILD_TIME}</small>"
 
           # Re-create release tag to publish fresh assets cleanly
           gh release delete "$TAG" --cleanup-tag -y || true
 
           gh release create "$TAG" \
-            --title "XBPS Binary Repository (x86_64)" \
-            --notes "Automated repository update at commit ${{ github.sha }}"
+            --title "$RELEASE_TITLE" \
+            --notes "$RELEASE_NOTES"
 
           gh release upload "$TAG" ./release-assets/* --clobber
