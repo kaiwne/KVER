@@ -12,6 +12,7 @@
 ## List Packages
 | Name           | Source                                           | Auto-update |
 |----------------|--------------------------------------------------|-------------|
+| brave-origin   | https://github.com/brave/brave-browser           | ✅          |
 | fcitx5-lotus   | https://github.com/LotusInputMethod/fcitx5-lotus | ✅          |
 | helium-browser | https://github.com/imputnet/helium-linux         | ✅          |
 | mangowc        | https://github.com/mangowm/mango                 | ✅          |
