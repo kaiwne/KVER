@@ -4,7 +4,7 @@ version=3.6.0
 revision=1
 _bamboo_version=e896341c568584d9cd8db0836d7ecb8d6ff79d1b
 build_style=cmake
-configure_args="-DLOTUS_UINPUT_PROXY_USER=_uinput_proxy -DINSTALL_RUNIT=ON -DRUNIT_SV_DIR=/usr/share/examples/sv -DLOTUS_BYTECOMPILE_PYTHON=OFF"
+configure_args="-DLOTUS_UINPUT_PROXY_USER=_uinput_proxy -DINSTALL_RUNIT=ON -DRUNIT_SV_DIR=/etc/sv -DLOTUS_BYTECOMPILE_PYTHON=OFF"
 hostmakedepends="extra-cmake-modules gettext pkgconf librsvg-utils go"
 makedepends="libfcitx5-devel libinput-devel eudev-libudev-devel"
 depends="fcitx5 acl-progs"
