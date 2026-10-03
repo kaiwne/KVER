@@ -9,13 +9,13 @@ maintainer="Kaiwne <kaiwne@proton.me>"
 license="OFL-1.1"
 homepage="https://github.com/googlefonts/googlesans-flex"
 changelog="https://github.com/googlefonts/googlesans-flex/releases"
-distfiles="https://github.com/googlefonts/googlesans-flex-v{$version}.zip"
+distfiles="https://github.com/googlefonts/googlesans-flex-v${version}.zip"
 checksum="b7375131bffc5eaaebeb65c69529ba10e7f7a9962b913488f6ef35c432ce19c9"
 
 font_dirs="/usr/share/fonts/TTF"
 provides="font:sans-serif-0_1"
 
 do_install() {
-	unzip googlesans-flex-v{$version}.zip
+	unzip googlesans-flex-v${version}.zip
 	vinstall GoogleSansFlex[GRAD,ROND,opsz,slnt,wdth,wght].ttf 644 usr/share/fonts/TTF
 }
