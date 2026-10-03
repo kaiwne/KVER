@@ -16,6 +16,6 @@ font_dirs="/usr/share/fonts/TTF"
 provides="font:sans-serif-0_1"
 
 do_install() {
-	unzip googlesans-flex-v${version}.zip
+	unzip GoogleSansFlex-v${version}.zip
 	vinstall GoogleSansFlex[GRAD,ROND,opsz,slnt,wdth,wght].ttf 644 usr/share/fonts/TTF
 }
