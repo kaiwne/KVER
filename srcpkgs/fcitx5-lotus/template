@@ -1,6 +1,6 @@
 # Template file for 'fcitx5-lotus'
 pkgname=fcitx5-lotus
-version=4.0.0
+version=4.0.1
 revision=1
 _bamboo_version=5f2635462de38dac74046282e6952b98cb3b8642
 build_style=cmake
@@ -14,8 +14,8 @@ license="GPL-3.0-or-later AND LGPL-2.1-or-later AND MIT AND GPL-2.0-or-later"
 homepage="https://lotusinputmethod.github.io/"
 distfiles="https://github.com/LotusInputMethod/fcitx5-lotus/archive/refs/tags/v${version}.tar.gz 
            https://github.com/LotusInputMethod/bamboo-core/archive/${_bamboo_version}.tar.gz"
-checksum="be342f8d2e6047691b8020ede56ded8a5e1cdec1546cc07abc7c7d590d47d4c6
- 4ad705120b927e29b42d556c38db8ac535b5724ac9aed29cfe554828c92a8bf4"
+checksum="98bf54e3ede73579fd0c3366ff2c1ffbc334eb110ad726c61be3f3e169677474
+ d5558cd419c8d46bdc958064cb97f963d1ea793866414c025906ec15033512ed"
 skip_extraction="${_bamboo_version}.tar.gz"
 system_accounts="_uinput_proxy"
 _uinput_proxy_groups="input"
