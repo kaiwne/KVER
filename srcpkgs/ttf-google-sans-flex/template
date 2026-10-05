@@ -2,7 +2,6 @@
 pkgname=ttf-google-sans-flex
 version=4.007
 revision=1
-hostmakedepends="unzip"
 depends="font-util"
 short_desc="Google Sans Flex"
 maintainer="Kaiwne <kaiwne@proton.me>"
@@ -16,6 +15,5 @@ font_dirs="/usr/share/fonts/TTF"
 provides="font:sans-serif-0_1"
 
 do_install() {
-	unzip GoogleSansFlex-v${version}.zip
-	vinstall GoogleSansFlex[GRAD,ROND,opsz,slnt,wdth,wght].ttf 644 usr/share/fonts/TTF
+	vinstall "GoogleSansFlex[GRAD,ROND,opsz,slnt,wdth,wght].ttf" 644 usr/share/fonts/TTF
 }
