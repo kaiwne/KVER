@@ -2,7 +2,6 @@
 pkgname=fcitx5-lotus
 version=4.0.1
 revision=1
-_bamboo_version=5f2635462de38dac74046282e6952b98cb3b8642
 build_style=cmake
 configure_args="-DLOTUS_UINPUT_PROXY_USER=_uinput_proxy -DINSTALL_RUNIT=ON -DRUNIT_SV_DIR=/etc/sv -DLOTUS_BYTECOMPILE_PYTHON=OFF"
 hostmakedepends="extra-cmake-modules gettext pkgconf librsvg-utils go"
@@ -12,19 +11,11 @@ short_desc="Fcitx5 Lotus - Vietnamese IME"
 maintainer="Kaiwne <kaiwne@proton.me>"
 license="GPL-3.0-or-later AND LGPL-2.1-or-later AND MIT AND GPL-2.0-or-later"
 homepage="https://lotusinputmethod.github.io/"
-distfiles="https://github.com/LotusInputMethod/fcitx5-lotus/archive/refs/tags/v${version}.tar.gz 
-           https://github.com/LotusInputMethod/bamboo-core/archive/${_bamboo_version}.tar.gz"
-checksum="98bf54e3ede73579fd0c3366ff2c1ffbc334eb110ad726c61be3f3e169677474
- d5558cd419c8d46bdc958064cb97f963d1ea793866414c025906ec15033512ed"
-skip_extraction="${_bamboo_version}.tar.gz"
+distfiles="https://github.com/LotusInputMethod/fcitx5-lotus/archive/refs/tags/v${version}.tar.gz"
+checksum="98bf54e3ede73579fd0c3366ff2c1ffbc334eb110ad726c61be3f3e169677474"
 system_accounts="_uinput_proxy"
 _uinput_proxy_groups="input"
 _uinput_proxy_descr="Lotus UInput Proxy User"
-
-
-post_extract() {
-	vsrcextract -C "bamboo/bamboo-core" "${_bamboo_version}.tar.gz"
-}
 
 post_install() {
 	vlicense bamboo/bamboo-core/LICENSE BAMBOO_CORE_LICENSE.txt
