@@ -1,0 +1,29 @@
+# Template file for 'ttf-google-sans'
+
+# ----------------------------------------
+
+pkgname=ttf-google-sans
+version=1.0.0
+revision=1
+short_desc="Google Sans Font"
+maintainer="Kaiwne <kaiwne@proton.me>"
+license="OFL-1.1"
+homepage="https://fonts.google.com/specimen/Google+Sans"
+
+# ----------------------------------------
+
+hostmakedepends="curl"
+depends="font-util"
+font_dirs="/usr/share/fonts/TTF/GoogleSans"
+provides="font:sans-serif-0_1"
+
+# ----------------------------------------
+
+do_install() {
+	curl -L "https://github.com/google/fonts/raw/refs/heads/main/ofl/googlesans/OFL.txt" -O
+	curl -L "https://github.com/google/fonts/raw/refs/heads/main/ofl/googlesans/GoogleSans%5BGRAD,opsz,wght%5D.ttf" -o "GoogleSans-VF.ttf"
+	curl -L "https://github.com/google/fonts/raw/refs/heads/main/ofl/googlesans/GoogleSans-Italic%5BGRAD,opsz,wght%5D.ttf" -o "GoogleSans-Italic-VF.ttf"
+	vlicense OFL.txt
+	vinstall "GoogleSans-VF.ttf" 644 ${font_dirs}
+	vinstall "GoogleSans-Italic-VF.ttf" 644 ${font_dirs}
+}
