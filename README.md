@@ -20,7 +20,9 @@
 | mangowc                 | https://github.com/mangowm/mango                 | ✅          |
 | scenefx                 | https://github.com/wlrfx/scenefx                 | ✅          |
 | scenefx-devel           | https://github.com/wlrfx/scenefx                 | ✅          |
-| ttf-google-sans-flex    | https://github.com/googlefonts/googlesans-flex   | ✅          |
+| ttf-apple-emoji         | https://github.com/samuelngs/apple-emoji-ttf     | ✅          |
+| ttf-google-sans         | https://github.com/google/fonts                  | ✅          |
+| ttf-google-sans-flex    | https://github.com/google/fonts                  | ✅          |
 | ttf-jetbrains-mono      | https://github.com/jetbrains/jetbrainsmono       | ✅          |
 
 ## TODO
