@@ -1,19 +1,27 @@
 # Template file for 'ttf-google-sans-flex'
+
+# ----------------------------------------
+
 pkgname=ttf-google-sans-flex
-version=4.007
+version=1.0.0
 revision=1
-depends="font-util"
 short_desc="Google Sans Flex"
 maintainer="Kaiwne <kaiwne@proton.me>"
 license="OFL-1.1"
-homepage="https://github.com/googlefonts/googlesans-flex"
-changelog="https://github.com/googlefonts/googlesans-flex/releases"
-distfiles="https://github.com/googlefonts/googlesans-flex/releases/download/v${version}/GoogleSansFlex-v${version}.zip"
-checksum="b7375131bffc5eaaebeb65c69529ba10e7f7a9962b913488f6ef35c432ce19c9"
+homepage="https://fonts.google.com/specimen/Google+Sans+Flex"
 
-font_dirs="/usr/share/fonts/TTF"
+# ----------------------------------------
+
+hostmakedepends="curl"
+depends="font-util"
+font_dirs="/usr/share/fonts/TTF/GoogleSans-Flex"
 provides="font:sans-serif-0_1"
 
+# ----------------------------------------
+
 do_install() {
-	vinstall "GoogleSansFlex[GRAD,ROND,opsz,slnt,wdth,wght].ttf" 644 usr/share/fonts/TTF
+	curl -L "https://github.com/google/fonts/raw/refs/heads/main/ofl/googlesansflex/OFL.txt" -O
+	curl -L "https://github.com/google/fonts/raw/refs/heads/main/ofl/googlesansflex/GoogleSansFlex%5BGRAD,ROND,opsz,slnt,wdth,wght%5D.ttf" -o "GoogleSansFlex-VF.ttf"
+	vlicense OFL.txt
+	vinstall "GoogleSansFlex-VF.ttf" 644 ${font_dirs}
 }
