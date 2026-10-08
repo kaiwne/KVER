@@ -3,7 +3,7 @@
 # -----------------------------------
 
 pkgname=ttf-apple-emoji
-version=1
+version=macos-26-20260722-484daf4e
 revision=1
 short_desc="Apple Color Emoji is a color typeface used by iOS and macOS to display emoji"
 maintainer="Kaiwne <kaiwne@proton.me>"
