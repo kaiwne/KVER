@@ -2,10 +2,9 @@
 # ==============================================================================
 # Universal Package Template Updater (update.sh)
 # Description:
-#   Automatically updates package version, sub-module commit hashes, and 
-#   recalculates multi-line SHA256 checksums for XBPS templates.
-#   Maintains correct component order and aligns multi-line attributes 
-#   with the opening quote boundary.
+#   Automatically updates package version and sub-module commit hashes, 
+#   recalculates SHA256 checksums, and updates the checksum block in the template.
+#   Does NOT modify the distfiles line in the template.
 # ==============================================================================
 
 set -euo pipefail
@@ -69,7 +68,6 @@ DISTFILES_BLOCK=$(grep -E '^\s*distfiles=' "$TEMPLATE_FILE" -A 25 | sed -n '/che
 for var_name in "${SUB_VARS[@]}"; do
     curr_val=$(get_var "$var_name")
     
-    # Match the distfile line containing this sub-version variable
     sub_url_line=$(echo "$DISTFILES_BLOCK" | grep -F "${var_name}" | head -n1 || true)
     if [[ -z "$sub_url_line" ]]; then
         clean_var_name="${var_name#_}"
@@ -103,9 +101,9 @@ if [[ "$HAS_UPDATES" == "false" ]]; then
 fi
 
 # ------------------------------------------------------------------------------
-# 3. Apply Template Modifications
+# 3. Apply Template Modifications (Version & Sub-variables ONLY - DO NOT touch distfiles)
 # ------------------------------------------------------------------------------
-echo "[INFO] Applying updates to $TEMPLATE_FILE..."
+echo "[INFO] Applying updates to variables in $TEMPLATE_FILE..."
 sed -i "s@^\(version=\).*@\1${LATEST_VER}@" "$TEMPLATE_FILE"
 sed -i "s@^\(revision=\).*@\11@" "$TEMPLATE_FILE"
 
@@ -114,28 +112,29 @@ for var_name in "${!SUB_NEW_VALS[@]}"; do
 done
 
 # ------------------------------------------------------------------------------
-# 4. Recalculate Checksums & Reformat Multi-line Blocks with Exact Indentation
+# 4. Recalculate Checksums & Update Checksum Block (Leave distfiles untouched)
 # ------------------------------------------------------------------------------
-echo "[INFO] Recalculating checksums and formatting template..."
-
-export version="$LATEST_VER"
-for var_name in "${!SUB_NEW_VALS[@]}"; do
-    export "${var_name}"="${SUB_NEW_VALS[$var_name]}"
-done
+echo "[INFO] Recalculating checksums..."
 
 DISTFILES_RAW=$(grep -E '^\s*distfiles=' "$TEMPLATE_FILE" -A 25 | sed -n '/checksum=/q;p' \
     | sed 's/distfiles=//' | tr -d '"' | tr -d "'")
 
-EVAL_DISTFILES=$(envsubst < <(echo "$DISTFILES_RAW"))
+EVAL_DISTFILES="$DISTFILES_RAW"
+EVAL_DISTFILES="${EVAL_DISTFILES//\$\{version\}/$LATEST_VER}"
+EVAL_DISTFILES="${EVAL_DISTFILES//\$version/$LATEST_VER}"
 
-URL_ARRAY=()
+for var_name in "${!SUB_NEW_VALS[@]}"; do
+    val="${SUB_NEW_VALS[$var_name]}"
+    EVAL_DISTFILES="${EVAL_DISTFILES//\$\{$var_name\}/$val}"
+    EVAL_DISTFILES="${EVAL_DISTFILES//\$$var_name/$val}"
+done
+
 CHECKSUM_ARRAY=()
 idx=0
 
 for url_entry in $EVAL_DISTFILES; do
     clean_url=$(echo "$url_entry" | cut -d'>' -f1 | xargs)
     if [[ -n "$clean_url" && "$clean_url" =~ ^https?:// ]]; then
-        URL_ARRAY+=("$url_entry")
         target_file="$TMP_DIR/distfile_${idx}.tar.gz"
         echo "[INFO] Downloading: $clean_url"
         if curl -sL "$clean_url" -o "$target_file"; then
@@ -149,36 +148,7 @@ for url_entry in $EVAL_DISTFILES; do
     fi
 done
 
-# Format distfiles: aligned after 'distfiles="' (11 spaces)
-if [[ ${#URL_ARRAY[@]} -gt 0 ]]; then
-    formatted_distfiles="distfiles=\"${URL_ARRAY[0]}"
-    for (( i=1; i<${#URL_ARRAY[@]}; i++ )); do
-        formatted_distfiles="${formatted_distfiles}\n           ${URL_ARRAY[$i]}"
-    done
-    formatted_distfiles="${formatted_distfiles}\""
-
-    awk -v replacement="$formatted_distfiles" '
-        /distfiles=/ {
-            print replacement
-            in_block = 1
-            next
-        }
-        in_block && (/checksum=/ || /^[a-f0-9]{64}"?/ || /^ / || /^\s*https?:\/\//) {
-            if (/checksum=/) {
-                in_block = 0
-                print
-                next
-            }
-            next
-        }
-        {
-            in_block = 0
-            print
-        }
-    ' "$TEMPLATE_FILE" > "$TMP_DIR/template.tmp0" && mv "$TMP_DIR/template.tmp0" "$TEMPLATE_FILE"
-fi
-
-# Format checksum: aligned after 'checksum="' (10 spaces)
+# Format checksum block: aligned after 'checksum="' (10 spaces indentation)
 if [[ ${#CHECKSUM_ARRAY[@]} -gt 0 ]]; then
     formatted_checksum="checksum=\"${CHECKSUM_ARRAY[0]}"
     for (( i=1; i<${#CHECKSUM_ARRAY[@]}; i++ )); do
@@ -199,7 +169,9 @@ if [[ ${#CHECKSUM_ARRAY[@]} -gt 0 ]]; then
             in_csum = 0
             print
         }
-    ' "$TEMPLATE_FILE" > "$TMP_DIR/template.tmp1" && mv "$TMP_DIR/template.tmp1" "$TEMPLATE_FILE"
+    ' "$TEMPLATE_FILE" > "$TMP_DIR/template.tmp" && mv "$TMP_DIR/template.tmp" "$TEMPLATE_FILE"
+    
+    echo "[INFO] Successfully updated checksums in template."
 fi
 
-echo "✨ Successfully updated package template and checksums!"
+echo "✨ Successfully updated package version and checksums!"
