@@ -22,7 +22,7 @@ _mcpell_core_version=0235714fbf5593df145e8f991f82c5926c2df2df
 # ---------------------------
 
 pkgname=cordial
-version=0.28.0
+version=0.32.0
 revision=1
 short_desc="Runs Roblox's official Android build, run natively on Linux"
 maintainer="Kaiwne <kaiwne@proton.me>"
@@ -52,7 +52,7 @@ distfiles="https://github.com/luohoa97/cordial/archive/refs/tags/v${version}.tar
            https://github.com/minecraft-linux/android_bionic/archive/${_mcpell_bionic_version}.tar.gz
            https://github.com/minecraft-linux/android_core/archive/${_mcpell_core_version}.tar.gz"
 
-checksum="58e3ff1dfe44508faf906e53f69edffab5b695c696c46b800bff3230f61d4879
+checksum="3736d8953a10fa4710fc9493b30c3120de75adac38c4165846af4a93ff5f95a9
           73c7f7fbf573c542767a4146297e4954369485077ae3880395445af787de0915
           5f823ab7c6f9cc7afb1475bea89a0416d10c5d6520b4b08f3dce6721ad236f45
           c66daf9f31712f673ebdffb074c90b5d7e61ea50adc6a1d2db95e798af027940
