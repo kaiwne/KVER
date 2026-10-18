@@ -21,6 +21,6 @@ provides="font:emoji-0_1"
 # -----------------------------------
 
 do_install() {
-	curl -L https://github.com/samuelngs/apple-emoji-ttf/releases/latest/download/AppleColorEmoji-Linux.ttf -O
+	curl -L https://github.com/samuelngs/apple-emoji-ttf/releases/latest/download/AppleColorEmoji-Linux.ttf -O --fail
 	vinstall "AppleColorEmoji-Linux.ttf" 644 ${font_dirs}
 }
