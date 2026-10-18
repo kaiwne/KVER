@@ -20,9 +20,9 @@ provides="font:sans-serif-0_1"
 # ----------------------------------------
 
 do_install() {
-	curl -L "https://github.com/google/fonts/raw/refs/heads/main/ofl/googlesans/OFL.txt" -O
-	curl -L "https://github.com/google/fonts/raw/refs/heads/main/ofl/googlesans/GoogleSans%5BGRAD,opsz,wght%5D.ttf" -o "GoogleSans-VF.ttf"
-	curl -L "https://github.com/google/fonts/raw/refs/heads/main/ofl/googlesans/GoogleSans-Italic%5BGRAD,opsz,wght%5D.ttf" -o "GoogleSans-Italic-VF.ttf"
+	curl -L "https://github.com/google/fonts/raw/refs/heads/main/ofl/googlesans/OFL.txt" -O --fail
+	curl -L "https://github.com/google/fonts/raw/refs/heads/main/ofl/googlesans/GoogleSans%5BGRAD,opsz,wght%5D.ttf" -o "GoogleSans-VF.ttf" --fail
+	curl -L "https://github.com/google/fonts/raw/refs/heads/main/ofl/googlesans/GoogleSans-Italic%5BGRAD,opsz,wght%5D.ttf" -o "GoogleSans-Italic-VF.ttf" --fail
 	vlicense OFL.txt
 	vinstall "GoogleSans-VF.ttf" 644 ${font_dirs}
 	vinstall "GoogleSans-Italic-VF.ttf" 644 ${font_dirs}
