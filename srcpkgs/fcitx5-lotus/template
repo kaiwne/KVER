@@ -5,7 +5,7 @@ revision=1
 build_style=cmake
 configure_args="-DLOTUS_UINPUT_PROXY_USER=_uinput_proxy -DINSTALL_RUNIT=ON -DRUNIT_SV_DIR=/etc/sv -DLOTUS_BYTECOMPILE_PYTHON=OFF"
 hostmakedepends="extra-cmake-modules gettext pkgconf"
-makedepends="libfcitx5-devel libinput-devel eudev-libudev-devel libevdev-devel"
+makedepends="libfcitx5-devel libinput-devel eudev-libudev-devel libevdev-devel libnotify-devel"
 depends="fcitx5 acl-progs"
 short_desc="Fcitx5 Lotus - Vietnamese IME"
 maintainer="Kaiwne <kaiwne@proton.me>"
